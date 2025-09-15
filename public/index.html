@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>ADS-B Tracker</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#111; color:#eee; }
+    #controls { margin: 10px; }
+    table { border-collapse: collapse; margin: 10px; background:#222; }
+    th, td { border:1px solid #555; padding:6px 10px; }
+    th { background:#333; }
+  </style>
+</head>
+<body>
+  <h1>ADS-B Tracker</h1>
+
+  <div id="controls">
+    <input type="text" id="hex" placeholder="ICAO Hex eingeben" />
+    <button onclick="setHex()">Flugzeug setzen</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Zeit</th><th>Callsign</th><th>Hex</th><th>Reg</th><th>Type</th>
+        <th>GS</th><th>Alt</th><th>Lat</th><th>Lon</th><th>VR</th><th>Hdg</th>
+      </tr>
+    </thead>
+    <tbody id="data"></tbody>
+  </table>
+
+  <script>
+    async function setHex() {
+      const hex = document.getElementById("hex").value;
+      if (hex) {
+        await fetch("/set?hex=" + hex);
+      }
+    }
+
+    async function update() {
+      const res = await fetch("/latest");
+      const d = await res.json();
+      if (!d.time) return;
+      const row = `<tr>
+        <td>${d.time}</td>
+        <td>${d.callsign}</td>
+        <td>${d.hex}</td>
+        <td>${d.reg}</td>
+        <td>${d.type}</td>
+        <td>${d.gs}</td>
+        <td>${d.alt}</td>
+        <td>${d.lat}</td>
+        <td>${d.lon}</td>
+        <td>${d.vr}</td>
+        <td>${d.hdg}</td>
+      </tr>`;
+      document.getElementById("data").innerHTML = row;
+    }
+
+    setInterval(update, 3000);
+  </script>
+</body>
+</html>

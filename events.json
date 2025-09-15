@@ -1,0 +1,123 @@
+[
+  {
+    "time": "2025-09-14T18:20:13.351Z",
+    "type": "takeoff",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.091,
+    "lon": 13.145,
+    "alt": 725,
+    "gs": 84,
+    "lastSeen": 4
+  },
+  {
+    "time": "2025-09-14T18:21:01.361Z",
+    "type": "landing",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.09,
+    "lon": 13.179,
+    "alt": 825,
+    "gs": 121,
+    "lastSeen": 85
+  },
+  {
+    "time": "2025-09-14T18:21:04.362Z",
+    "type": "takeoff",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.09,
+    "lon": 13.179,
+    "alt": 825,
+    "gs": 121,
+    "lastSeen": 8
+  },
+  {
+    "time": "2025-09-14T18:21:37.370Z",
+    "type": "landing",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.213,
+    "alt": 825,
+    "gs": 127,
+    "lastSeen": 62
+  },
+  {
+    "time": "2025-09-14T18:21:40.370Z",
+    "type": "takeoff",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.225,
+    "alt": 825,
+    "gs": 127,
+    "lastSeen": 8
+  },
+  {
+    "time": "2025-09-14T18:22:13.377Z",
+    "type": "landing",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.088,
+    "lon": 13.253,
+    "alt": 825,
+    "gs": 128,
+    "lastSeen": 51
+  },
+  {
+    "time": "2025-09-14T18:22:22.383Z",
+    "type": "takeoff",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.088,
+    "lon": 13.266,
+    "alt": 800,
+    "gs": 128,
+    "lastSeen": 2
+  },
+  {
+    "time": "2025-09-14T18:23:43.414Z",
+    "type": "landing",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.085,
+    "lon": 13.337,
+    "alt": 800,
+    "gs": 128,
+    "lastSeen": 79
+  },
+  {
+    "time": "2025-09-14T18:23:46.427Z",
+    "type": "takeoff",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.084,
+    "lon": 13.348,
+    "alt": 825,
+    "gs": 128,
+    "lastSeen": 4
+  },
+  {
+    "time": "2025-09-14T18:26:13.434Z",
+    "type": "landing",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.408,
+    "alt": 100,
+    "gs": 8,
+    "lastSeen": 66
+  },
+  {
+    "time": "2025-09-14T18:31:10.507Z",
+    "type": "takeoff",
+    "hex": "3E0FE9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.408,
+    "alt": 100,
+    "gs": 8,
+    "lastSeen": 5
+  }
+]
