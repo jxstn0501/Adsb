@@ -119,5 +119,49 @@
     "alt": 100,
     "gs": 8,
     "lastSeen": 5
+  },
+  {
+    "time": "2025-09-15T22:22:38.622Z",
+    "type": "takeoff",
+    "hex": "3e1682",
+    "callsign": "CHX34",
+    "lat": 53.812,
+    "lon": 12.202,
+    "alt": 400,
+    "gs": 29,
+    "lastSeen": 5
+  },
+  {
+    "time": "2025-09-15T22:24:05.564Z",
+    "type": "takeoff",
+    "hex": "4cadf7",
+    "callsign": "RYR34WW",
+    "lat": 51.599,
+    "lon": 10.625,
+    "alt": 38000,
+    "gs": 395,
+    "lastSeen": 1
+  },
+  {
+    "time": "2025-09-15T22:41:54.409Z",
+    "type": "takeoff",
+    "hex": "4cadf7",
+    "callsign": "RYR34WW",
+    "lat": 51.794,
+    "lon": 7.513,
+    "alt": 38000,
+    "gs": 395,
+    "lastSeen": 1
+  },
+  {
+    "time": "2025-09-15T22:43:09.442Z",
+    "type": "takeoff",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.411,
+    "alt": 425,
+    "gs": 33,
+    "lastSeen": 5
   }
 ]
