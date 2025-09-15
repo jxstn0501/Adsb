@@ -1,43 +1,305 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <title>ADS-B Tracker</title>
+  <meta charset="UTF-8" />
+  <title>Heli Tracker</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: Arial, sans-serif; background:#111; color:#eee; }
-    #controls { margin: 10px; }
-    table { border-collapse: collapse; margin: 10px; background:#222; }
-    th, td { border:1px solid #555; padding:6px 10px; }
-    th { background:#333; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f2f2f7;
+      color: #111;
+    }
+    body { display: flex; flex-direction: column; }
+
+    /* Sidebar */
+    .sidebar {
+      position: fixed;
+      top: 0; left: -260px;
+      width: 240px; height: 100%;
+      background: #1c1c1e;
+      color: #fff;
+      overflow-y: auto;
+      transition: left 0.3s ease;
+      z-index: 1000;
+      padding: 20px 15px;
+    }
+    .sidebar.active { left: 0; }
+    .sidebar h2 {
+      margin-top: 0; font-size: 18px; margin-bottom: 12px;
+    }
+    .sidebar button {
+      width: 100%; padding: 12px; margin: 6px 0;
+      border: none; border-radius: 6px;
+      background: #2c2c2e; color: #fff;
+      font-size: 16px; cursor: pointer;
+    }
+    .sidebar button:hover { background: #3a3a3c; }
+
+    /* Overlay hinter Sidebar */
+    .overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      opacity: 0; visibility: hidden;
+      transition: opacity 0.3s ease;
+      z-index: 900;
+    }
+    .overlay.active {
+      opacity: 1; visibility: visible;
+    }
+
+    /* Topbar */
+    .topbar {
+      height: 50px;
+      background: #ff3b30;
+      color: #fff;
+      display: flex; align-items: center;
+      padding: 0 15px;
+    }
+    .menu-btn {
+      font-size: 22px; cursor: pointer;
+      background: none; border: none; color: #fff;
+    }
+    .title {
+      margin-left: 10px; font-weight: 600; font-size: 18px;
+    }
+
+    /* Main Content */
+    #content {
+      flex: 1;
+      height: calc(100% - 50px);
+      width: 100%;
+      background: #f2f2f7;
+      position: relative;
+      overflow-y: auto;
+    }
+    iframe {
+      border: none; width: 100%; height: 100%;
+    }
+    .logs {
+      padding: 10px; color: #111; background: #f2f2f7;
+      overflow-y: auto; height: 100%;
+    }
+    .log-entry {
+      background: #fff; margin: 6px 0; padding: 8px 10px;
+      border-radius: 12px; font-size: 14px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .settings {
+      padding: 20px;
+    }
+    .settings input,
+    .settings button {
+      width: 100%; padding: 12px; margin: 6px 0;
+      border: none; border-radius: 8px; font-size: 16px;
+    }
+    .settings button {
+      background: #ff3b30; color: #fff; cursor: pointer;
+    }
+    .settings button:hover { opacity: 0.9; }
+    .settings table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .settings th, .settings td {
+      text-align: left; padding: 8px; border-bottom: 1px solid #ddd;
+      font-size: 14px;
+    }
+    .settings th { background: #f2f2f7; }
   </style>
 </head>
 <body>
-  <h1>ADS-B Tracker</h1>
-
-  <div id="controls">
-    <input type="text" id="hex" placeholder="ICAO Hex eingeben" />
-    <button onclick="setHex()">Flugzeug setzen</button>
+  <div class="topbar">
+    <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+    <div class="title">Heli Tracker</div>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Zeit</th><th>Callsign</th><th>Hex</th><th>Reg</th><th>Type</th>
-        <th>GS</th><th>Alt</th><th>Lat</th><th>Lon</th><th>VR</th><th>Hdg</th>
-      </tr>
-    </thead>
-    <tbody id="data"></tbody>
-  </table>
+  <div id="content">
+    <div class="logs">Lade Daten...</div>
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar" class="sidebar">
+    <h2>Menü</h2>
+    <button onclick="showADSB()">ADSBExchange Map</button>
+    <button onclick="showEvents()">Meine Events</button>
+    <button onclick="showLogs()">Meine Logs</button>
+    <button onclick="showSettings()">Einstellungen</button>
+  </div>
+  <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
 
   <script>
-    async function setHex() {
-      const hex = document.getElementById("hex").value;
-      if (hex) {
-        await fetch("/set?hex=" + hex);
+    let currentHex = "";
+    let settingsInterval = null;
+
+    window.addEventListener("DOMContentLoaded", initializeTracker);
+
+    async function initializeTracker() {
+      document.getElementById("content").innerHTML = '<div class="logs">Lade Daten...</div>';
+
+      const detectedHex = (await fetchLatestHex()) || (await fetchFirstHexFromLogs());
+
+      if (detectedHex) {
+        renderMap(detectedHex);
+      } else {
+        document.getElementById("content").innerHTML = '<div class="logs">Keine ICAO Hex verfügbar.</div>';
       }
     }
 
-    async function update() {
+    async function fetchLatestHex() {
+      try {
+        const r = await fetch("/latest");
+        if (!r.ok) return null;
+        const data = await r.json();
+        if (data && typeof data.hex === "string" && data.hex.trim()) {
+          return data.hex.trim().toLowerCase();
+        }
+      } catch (err) {
+        console.warn("[Init] /latest konnte nicht geladen werden:", err);
+      }
+      return null;
+    }
+
+    async function fetchFirstHexFromLogs() {
+      try {
+        const r = await fetch("/log");
+        if (!r.ok) return null;
+        const list = await r.json();
+        if (Array.isArray(list) && list.length > 0) {
+          const candidate = list.find(entry => entry && entry.hex && entry.count > 0) || list[0];
+          if (candidate && candidate.hex) {
+            return String(candidate.hex).toLowerCase();
+          }
+        }
+      } catch (err) {
+        console.warn("[Init] /log Übersicht konnte nicht geladen werden:", err);
+      }
+      return null;
+    }
+
+    function setCurrentHex(hex) {
+      if (!hex) return;
+      currentHex = String(hex).trim().toLowerCase();
+      const input = document.getElementById("hexInput");
+      if (input) {
+        input.value = currentHex;
+      }
+    }
+
+    function renderMap(hex = currentHex) {
+      if (!hex) {
+        document.getElementById("content").innerHTML = '<div class="logs">Bitte eine ICAO Hex eingeben.</div>';
+        return;
+      }
+
+      setCurrentHex(hex);
+      document.getElementById("content").innerHTML =
+        `<iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"></iframe>`;
+    }
+
+    function toggleSidebar() {
+      document.getElementById("sidebar").classList.toggle("active");
+      document.getElementById("overlay").classList.toggle("active");
+    }
+
+    function closeSidebar() {
+      document.getElementById("sidebar").classList.remove("active");
+      document.getElementById("overlay").classList.remove("active");
+    }
+
+    function stopSettingsInterval() {
+      if (settingsInterval) {
+        clearInterval(settingsInterval);
+        settingsInterval = null;
+      }
+    }
+
+    function showADSB() {
+      stopSettingsInterval();
+      renderMap(currentHex);
+      closeSidebar();
+    }
+
+    async function showEvents() {
+      stopSettingsInterval();
+      const r = await fetch("/events");
+      const data = await r.json();
+      let html = '<div class="logs">';
+      data.forEach(ev => {
+        html += `<div class="log-entry">
+          <b>${ev.type.toUpperCase()}</b> – ${ev.callsign||ev.hex}<br>
+          Alt: ${ev.alt||'—'} ft | Speed: ${ev.gs||'—'} kt<br>
+          ${ev.lat}, ${ev.lon}<br>
+          <small>${ev.time}</small>
+        </div>`;
+      });
+      html += '</div>';
+      document.getElementById("content").innerHTML = html;
+      closeSidebar();
+    }
+
+    async function showLogs() {
+      stopSettingsInterval();
+      let html = '<div class="logs">';
+
+      if (!currentHex) {
+        html += 'Bitte eine ICAO Hex eingeben.';
+        html += '</div>';
+        document.getElementById("content").innerHTML = html;
+        closeSidebar();
+        return;
+      }
+
+      console.log("[Logs] Lade Daten für", currentHex);
+
+      try {
+        const r = await fetch(`/log?hex=${encodeURIComponent(currentHex)}`);
+        console.log("[Logs] Antwortstatus:", r.status);
+
+        let data = [];
+        if (r.status === 404) {
+          console.warn(`[Logs] Keine Log-Datei für ${currentHex} gefunden.`);
+        } else if (!r.ok) {
+          throw new Error(`Serverantwort ${r.status}`);
+        } else {
+          data = await r.json();
+        }
+
+        console.log("[Logs] Antwortgröße:", Array.isArray(data) ? data.length : data);
+
+        if (!Array.isArray(data) || data.length === 0) {
+          console.warn(`[Logs] Keine Daten für ${currentHex} erhalten.`);
+          html += 'keine Daten gefunden';
+        } else {
+          console.log(`[Logs] Verarbeite ${Math.min(data.length, 200)} von ${data.length} Einträgen.`);
+          data.slice(-200).forEach(d => {
+            html += `<div class="log-entry">
+          ${d.callsign||d.hex} – Alt ${d.alt||'—'} ft, Speed ${d.gs||'—'} kt<br>
+          Pos: ${d.lat}, ${d.lon}<br>
+          <small>${d.time}</small>
+        </div>`;
+          });
+        }
+      } catch (err) {
+        console.error("[Logs] Fehler beim Laden der Logs:", err);
+        html += `Fehler beim Laden der Logs (${err.message})`;
+      }
+
+      html += '</div>';
+      document.getElementById("content").innerHTML = html;
+      closeSidebar();
+    }
+    
+    async function applyHex() {
+      const input = document.getElementById("hexInput");
+      const hex = input ? input.value.trim() : "";
+      if (hex) {
+        await fetch(`/set?hex=${encodeURIComponent(hex)}`);
+        setCurrentHex(hex);
+        updateLatest();
+      }
+    }
+
+    async function updateLatest() {
       const res = await fetch("/latest");
       const d = await res.json();
       if (!d.time) return;
@@ -54,10 +316,31 @@
         <td>${d.vr}</td>
         <td>${d.hdg}</td>
       </tr>`;
-      document.getElementById("data").innerHTML = row;
+      const body = document.getElementById("latestBody");
+      if (body) body.innerHTML = row;
     }
 
-    setInterval(update, 3000);
+    function showSettings() {
+      stopSettingsInterval();
+      const html = `<div class="settings">
+        <input id="hexInput" type="text" placeholder="ICAO Hex" value="${currentHex}" />
+        <button onclick="applyHex()">Flugzeug setzen</button>
+        <table>
+          <thead>
+            <tr>
+              <th>Zeit</th><th>Callsign</th><th>Hex</th><th>Reg</th><th>Type</th>
+              <th>GS</th><th>Alt</th><th>Lat</th><th>Lon</th><th>VR</th><th>Hdg</th>
+            </tr>
+          </thead>
+          <tbody id="latestBody"></tbody>
+        </table>
+      </div>`;
+      document.getElementById("content").innerHTML = html;
+      updateLatest();
+      settingsInterval = setInterval(updateLatest, 3000);
+      closeSidebar();
+    }
+
   </script>
 </body>
 </html>
