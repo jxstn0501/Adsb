@@ -214,16 +214,17 @@ const server = http.createServer((req, res) => {
 
   } else if (q.pathname === "/log") {
     const hex = q.query.hex ? q.query.hex.toLowerCase() : null;
+    res.writeHead(200, { "Content-Type": "application/json" });
     if (hex) {
-      if (db[hex]) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(db[hex]));
+      const records = db[hex] || [];
+      if (records.length === 0) {
+        console.warn("ℹ️  /log keine Daten für", hex);
       } else {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end("[]");
+        console.log("📨 /log Anfrage für", hex, "->", records.length, "Einträge");
       }
+      res.end(JSON.stringify(records));
     } else {
-      res.writeHead(200, { "Content-Type": "application/json" });
+      console.log("📨 /log Anfrage ohne hex -> vollständige Datenbank (", Object.keys(db).length, "Hex-Codes)");
       res.end(JSON.stringify(db));
     }
 
