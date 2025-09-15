@@ -13,6 +13,25 @@ let latestData = {};      // letzter Datensatz fürs aktuelle Ziel
 let events = [];          // Takeoff/Landing-Events
 let flightStatus = {};    // Status pro Flugzeug ("online"/"offline")
 
+// ===== State loading =====
+try {
+  const savedDb = fs.readFileSync("adsb_log.json", "utf8");
+  db = JSON.parse(savedDb);
+} catch (e) {}
+try {
+  const savedEvents = fs.readFileSync("events.json", "utf8");
+  events = JSON.parse(savedEvents);
+} catch (e) {}
+try {
+  const savedTarget = fs.readFileSync("last_target.json", "utf8");
+  const parsed = JSON.parse(savedTarget);
+  if (parsed.hex) targetHex = parsed.hex.toLowerCase();
+} catch (e) {}
+try {
+  const savedLatest = fs.readFileSync("latest.json", "utf8");
+  latestData = JSON.parse(savedLatest);
+} catch (e) {}
+
 // ===== Helpers =====
 function cleanNum(str) {
   if (!str) return null;
@@ -112,6 +131,7 @@ async function scrape() {
     };
 
     latestData = record;
+    fs.writeFileSync("latest.json", JSON.stringify(latestData, null, 2));
 
     // Event-Erkennung
     const status = detectEventByLastSeen(record);
@@ -191,6 +211,7 @@ const server = http.createServer((req, res) => {
   } else if (q.pathname === "/set") {
     if (q.query.hex) {
       targetHex = q.query.hex.toLowerCase();
+      fs.writeFileSync("last_target.json", JSON.stringify({ hex: targetHex }));
       page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" });
       res.end("✅ Neues Ziel gesetzt: " + targetHex);
     } else {
