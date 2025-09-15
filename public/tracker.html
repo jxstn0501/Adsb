@@ -34,6 +34,11 @@
       font-size: 16px; cursor: pointer;
     }
     .sidebar button:hover { background: #3a3a3c; }
+    .sidebar input {
+      width: 100%; padding: 12px; margin: 6px 0;
+      border: none; border-radius: 6px;
+      font-size: 16px;
+    }
 
     /* Overlay hinter Sidebar */
     .overlay {
@@ -101,6 +106,7 @@
     <h2>Menü</h2>
     <button onclick="showADSB()">ADSBExchange Map</button>
     <button onclick="showEvents()">Meine Events</button>
+    <input id="hexInput" type="text" placeholder="ICAO Hex" value="3e0fe9" />
     <button onclick="showLogs()">Meine Logs</button>
   </div>
   <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
@@ -140,16 +146,21 @@
     }
 
     async function showLogs() {
-      const r = await fetch("/log?hex=3e0fe9");
+      const hex = document.getElementById("hexInput").value.trim() || "3e0fe9";
+      const r = await fetch(`/log?hex=${encodeURIComponent(hex)}`);
       const data = await r.json();
       let html = '<div class="logs">';
-      data.slice(-200).forEach(d => {
-        html += `<div class="log-entry">
+      if (!Array.isArray(data) || data.length === 0) {
+        html += 'keine Daten gefunden';
+      } else {
+        data.slice(-200).forEach(d => {
+          html += `<div class="log-entry">
           ${d.callsign||d.hex} – Alt ${d.alt||'—'} ft, Speed ${d.gs||'—'} kt<br>
           Pos: ${d.lat}, ${d.lon}<br>
           <small>${d.time}</small>
         </div>`;
-      });
+        });
+      }
       html += '</div>';
       document.getElementById("content").innerHTML = html;
       closeSidebar();
