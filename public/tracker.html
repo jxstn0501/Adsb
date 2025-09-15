@@ -97,8 +97,7 @@
   </div>
 
   <div id="content">
-    <!-- Default: ADSB Map -->
-    <iframe id="mapFrame" src="https://globe.adsbexchange.com/?icao=3e0fe9"></iframe>
+    <div class="logs">Lade Daten...</div>
   </div>
 
   <!-- Sidebar -->
@@ -106,12 +105,79 @@
     <h2>Menü</h2>
     <button onclick="showADSB()">ADSBExchange Map</button>
     <button onclick="showEvents()">Meine Events</button>
-    <input id="hexInput" type="text" placeholder="ICAO Hex" value="3e0fe9" />
+    <input id="hexInput" type="text" placeholder="ICAO Hex" />
     <button onclick="showLogs()">Meine Logs</button>
   </div>
   <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
 
   <script>
+    let currentHex = "";
+
+    window.addEventListener("DOMContentLoaded", initializeTracker);
+
+    async function initializeTracker() {
+      document.getElementById("content").innerHTML = '<div class="logs">Lade Daten...</div>';
+
+      const detectedHex = (await fetchLatestHex()) || (await fetchFirstHexFromLogs());
+
+      if (detectedHex) {
+        renderMap(detectedHex);
+      } else {
+        document.getElementById("content").innerHTML = '<div class="logs">Keine ICAO Hex verfügbar.</div>';
+      }
+    }
+
+    async function fetchLatestHex() {
+      try {
+        const r = await fetch("/latest");
+        if (!r.ok) return null;
+        const data = await r.json();
+        if (data && typeof data.hex === "string" && data.hex.trim()) {
+          return data.hex.trim().toLowerCase();
+        }
+      } catch (err) {
+        console.warn("[Init] /latest konnte nicht geladen werden:", err);
+      }
+      return null;
+    }
+
+    async function fetchFirstHexFromLogs() {
+      try {
+        const r = await fetch("/log");
+        if (!r.ok) return null;
+        const list = await r.json();
+        if (Array.isArray(list) && list.length > 0) {
+          const candidate = list.find(entry => entry && entry.hex && entry.count > 0) || list[0];
+          if (candidate && candidate.hex) {
+            return String(candidate.hex).toLowerCase();
+          }
+        }
+      } catch (err) {
+        console.warn("[Init] /log Übersicht konnte nicht geladen werden:", err);
+      }
+      return null;
+    }
+
+    function setCurrentHex(hex) {
+      if (!hex) return;
+      currentHex = String(hex).trim().toLowerCase();
+      const input = document.getElementById("hexInput");
+      if (input) {
+        input.value = currentHex;
+      }
+    }
+
+    function renderMap(hex = currentHex) {
+      if (!hex) {
+        document.getElementById("content").innerHTML = '<div class="logs">Bitte eine ICAO Hex eingeben.</div>';
+        return;
+      }
+
+      setCurrentHex(hex);
+      document.getElementById("content").innerHTML =
+        `<iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"></iframe>`;
+    }
+
     function toggleSidebar() {
       document.getElementById("sidebar").classList.toggle("active");
       document.getElementById("overlay").classList.toggle("active");
@@ -123,8 +189,9 @@
     }
 
     function showADSB() {
-      document.getElementById("content").innerHTML =
-        '<iframe src="https://globe.adsbexchange.com/?icao=3e0fe9"></iframe>';
+      const hexInput = document.getElementById("hexInput");
+      const requestedHex = (hexInput && hexInput.value ? hexInput.value.trim() : "") || currentHex;
+      renderMap(requestedHex);
       closeSidebar();
     }
 
@@ -146,19 +213,38 @@
     }
 
     async function showLogs() {
-      const hex = document.getElementById("hexInput").value.trim() || "3e0fe9";
-      console.log("[Logs] Lade Daten für", hex);
+      const hexInput = document.getElementById("hexInput");
+      const requestedHex = (hexInput && hexInput.value ? hexInput.value.trim() : "") || currentHex;
       let html = '<div class="logs">';
+
+      if (!requestedHex) {
+        html += 'Bitte eine ICAO Hex eingeben.';
+        html += '</div>';
+        document.getElementById("content").innerHTML = html;
+        closeSidebar();
+        return;
+      }
+
+      setCurrentHex(requestedHex);
+      console.log("[Logs] Lade Daten für", currentHex);
+
       try {
-        const r = await fetch(`/log?hex=${encodeURIComponent(hex)}`);
+        const r = await fetch(`/log?hex=${encodeURIComponent(currentHex)}`);
         console.log("[Logs] Antwortstatus:", r.status);
-        if (!r.ok) {
+
+        let data = [];
+        if (r.status === 404) {
+          console.warn(`[Logs] Keine Log-Datei für ${currentHex} gefunden.`);
+        } else if (!r.ok) {
           throw new Error(`Serverantwort ${r.status}`);
+        } else {
+          data = await r.json();
         }
-        const data = await r.json();
+
         console.log("[Logs] Antwortgröße:", Array.isArray(data) ? data.length : data);
+
         if (!Array.isArray(data) || data.length === 0) {
-          console.warn(`[Logs] Keine Daten für ${hex} erhalten.`);
+          console.warn(`[Logs] Keine Daten für ${currentHex} erhalten.`);
           html += 'keine Daten gefunden';
         } else {
           console.log(`[Logs] Verarbeite ${Math.min(data.length, 200)} von ${data.length} Einträgen.`);
@@ -174,10 +260,12 @@
         console.error("[Logs] Fehler beim Laden der Logs:", err);
         html += `Fehler beim Laden der Logs (${err.message})`;
       }
+
       html += '</div>';
       document.getElementById("content").innerHTML = html;
       closeSidebar();
     }
+
   </script>
 </body>
 </html>
