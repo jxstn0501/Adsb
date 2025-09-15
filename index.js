@@ -13,6 +13,17 @@ let latestData = {};      // letzter Datensatz fürs aktuelle Ziel
 let events = [];          // Takeoff/Landing-Events
 let flightStatus = {};    // Status pro Flugzeug ("online"/"offline")
 
+const CONFIG_FILE = "config.json";
+const defaultConfig = {
+  eventThresholds: {
+    altitude: 100,
+    groundSpeed: 30,
+    duration: 45
+  }
+};
+
+let config = JSON.parse(JSON.stringify(defaultConfig));
+
 // ===== State loading =====
 try {
   const savedDb = fs.readFileSync("adsb_log.json", "utf8");
@@ -30,6 +41,18 @@ try {
 try {
   const savedLatest = fs.readFileSync("latest.json", "utf8");
   latestData = JSON.parse(savedLatest);
+} catch (e) {}
+try {
+  const savedConfig = fs.readFileSync(CONFIG_FILE, "utf8");
+  const parsed = JSON.parse(savedConfig);
+  config = {
+    ...config,
+    ...parsed,
+    eventThresholds: {
+      ...config.eventThresholds,
+      ...(parsed.eventThresholds || {})
+    }
+  };
 } catch (e) {}
 
 // ===== Helpers =====
@@ -51,6 +74,23 @@ function parseLastSeen(raw) {
   return isNaN(sec) ? null : sec;
 }
 
+function normalizeThreshold(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : fallback;
+}
+
+function updateTarget(hex) {
+  targetHex = hex.toLowerCase();
+  fs.writeFileSync("last_target.json", JSON.stringify({ hex: targetHex }));
+  if (page) {
+    page
+      .goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, {
+        waitUntil: "domcontentloaded"
+      })
+      .catch(err => console.error("❌ Fehler beim Aktualisieren der Seite:", err.message));
+  }
+}
+
 // ===== Event Detection =====
 function detectEventByLastSeen(record) {
   const hex = record.hex;
@@ -65,13 +105,13 @@ function detectEventByLastSeen(record) {
   const prev = flightStatus[hex] || "offline";
   let now = prev;
 
-  if (lastSeenSec < 10 &&
-      ((record.alt !== null && record.alt > 100) ||
-       (record.vr !== null && record.vr > 0))) {
+  const thresholds = config.eventThresholds || defaultConfig.eventThresholds;
+  const altitudeReached = record.alt !== null && record.alt >= thresholds.altitude;
+  const speedReached = record.gs !== null && record.gs >= thresholds.groundSpeed;
+
+  if (lastSeenSec <= thresholds.duration && (altitudeReached || speedReached)) {
     now = "online";
-  } else if (lastSeenSec > 50 &&
-             ((record.alt !== null && record.alt < 100) ||
-              (record.vr !== null && record.vr <= 0))) {
+  } else if (lastSeenSec > thresholds.duration && !altitudeReached && !speedReached) {
     now = "offline";
   }
 
@@ -231,18 +271,79 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(events));
 
+  } else if (q.pathname === "/config") {
+    if (req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          hex: targetHex,
+          eventThresholds: config.eventThresholds
+        })
+      );
+    } else if (req.method === "POST") {
+      let body = "";
+      req.on("data", chunk => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        try {
+          const payload = JSON.parse(body || "{}");
+          if (payload.eventThresholds) {
+            const thresholds = payload.eventThresholds;
+            config.eventThresholds = {
+              altitude: normalizeThreshold(
+                thresholds.altitude,
+                defaultConfig.eventThresholds.altitude
+              ),
+              groundSpeed: normalizeThreshold(
+                thresholds.groundSpeed,
+                defaultConfig.eventThresholds.groundSpeed
+              ),
+              duration: normalizeThreshold(
+                thresholds.duration,
+                defaultConfig.eventThresholds.duration
+              )
+            };
+          }
+
+          if (payload.hex) {
+            updateTarget(payload.hex);
+          }
+
+          fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: true,
+              hex: targetHex,
+              eventThresholds: config.eventThresholds
+            })
+          );
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+    } else {
+      res.writeHead(405);
+      res.end();
+    }
+
   } else if (q.pathname === "/set") {
     if (q.query.hex) {
-      targetHex = q.query.hex.toLowerCase();
-      fs.writeFileSync("last_target.json", JSON.stringify({ hex: targetHex }));
-      page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" });
+      updateTarget(q.query.hex);
       res.end("✅ Neues Ziel gesetzt: " + targetHex);
     } else {
       res.end("❌ Bitte ?hex=xxxxxx angeben");
     }
 
   } else {
-    let filePath = path.join(__dirname, "public", q.pathname === "/" ? "index.html" : q.pathname);
+    let filePath = path.join(
+      __dirname,
+      "public",
+      q.pathname === "/" ? "app.html" : q.pathname
+    );
     serveStatic(res, filePath);
   }
 });

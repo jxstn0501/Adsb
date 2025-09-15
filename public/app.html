@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Heli Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <div class="flex h-screen overflow-hidden">
+    <aside
+      id="sidebar"
+      class="fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r border-slate-800/80 bg-slate-900/95 p-6 shadow-xl transition-transform duration-200 ease-in-out md:static md:translate-x-0 md:shadow-none"
+    >
+      <div class="mb-6">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Menü</h2>
+      </div>
+      <nav class="space-y-2">
+        <button
+          data-tab-button="map"
+          onclick="showTab('map')"
+          class="w-full rounded-md border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+        >
+          ADSBExchange Map
+        </button>
+        <button
+          data-tab-button="live"
+          onclick="showTab('live')"
+          class="w-full rounded-md border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+        >
+          Live-Daten
+        </button>
+        <button
+          data-tab-button="events"
+          onclick="showTab('events')"
+          class="w-full rounded-md border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+        >
+          Meine Events
+        </button>
+        <button
+          data-tab-button="logs"
+          onclick="showTab('logs')"
+          class="w-full rounded-md border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+        >
+          Meine Logs
+        </button>
+        <button
+          data-tab-button="config"
+          onclick="showTab('config')"
+          class="w-full rounded-md border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+        >
+          Konfiguration
+        </button>
+      </nav>
+    </aside>
+    <div
+      id="overlay"
+      class="fixed inset-0 z-30 hidden bg-black/60 backdrop-blur-sm md:hidden"
+      onclick="toggleSidebar(false)"
+    ></div>
+
+    <div class="flex min-h-screen flex-1 flex-col bg-slate-950 md:ml-64">
+      <header class="flex h-14 items-center justify-between border-b border-slate-800/80 bg-slate-900/80 px-4">
+        <div class="flex items-center gap-3">
+          <button
+            class="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700/60 bg-slate-800/70 text-lg text-slate-200 transition hover:bg-slate-700 md:hidden"
+            onclick="toggleSidebar()"
+            aria-label="Menü öffnen"
+          >
+            ☰
+          </button>
+          <span class="text-lg font-semibold tracking-wide">Heli Tracker</span>
+        </div>
+        <div class="text-xs font-medium text-slate-400">
+          Letzte Aktualisierung: <span id="statusTimestamp" class="text-slate-200">—</span>
+        </div>
+      </header>
+
+      <main class="flex-1 overflow-hidden">
+        <section id="tab-map" data-tab class="hidden h-full">
+          <iframe
+            id="mapFrame"
+            title="ADSBExchange Map"
+            class="h-full w-full border-0"
+            src="https://globe.adsbexchange.com/?icao=3e0fe9"
+            loading="lazy"
+          ></iframe>
+        </section>
+
+        <section id="tab-live" data-tab class="hidden h-full overflow-y-auto">
+          <div class="space-y-6 p-6">
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-800/80 bg-slate-900/70 p-4">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Ziel setzen</h3>
+                <div class="mt-3 flex flex-col gap-3 sm:flex-row">
+                  <input
+                    id="hexInput"
+                    type="text"
+                    placeholder="ICAO Hex"
+                    class="flex-1 rounded-md border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                  <button
+                    onclick="setHex()"
+                    class="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+                  >
+                    Speichern
+                  </button>
+                </div>
+                <p class="mt-2 text-xs text-slate-400">
+                  Aktuelles Ziel: <span id="currentHex" class="font-mono text-slate-100">—</span>
+                </p>
+                <p id="hexStatus" class="mt-1 text-xs text-sky-400"></p>
+              </div>
+              <div class="rounded-lg border border-slate-800/80 bg-slate-900/70 p-4">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Konfigurations-Überblick</h3>
+                <dl class="mt-3 space-y-2 text-sm text-slate-200">
+                  <div class="flex items-center justify-between">
+                    <dt class="text-slate-400">Höhen-Schwelle</dt>
+                    <dd id="overviewAltitude" class="font-mono">—</dd>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <dt class="text-slate-400">GS-Schwelle</dt>
+                    <dd id="overviewGs" class="font-mono">—</dd>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <dt class="text-slate-400">Dauer (s)</dt>
+                    <dd id="overviewDuration" class="font-mono">—</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-800/80 bg-slate-900/70 p-4">
+              <div class="flex items-center justify-between">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Aktuelle Daten</h3>
+                <button
+                  onclick="updateLatest()"
+                  class="rounded-md border border-slate-700/60 px-3 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-800"
+                >
+                  Aktualisieren
+                </button>
+              </div>
+              <div class="mt-4 overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-800 text-sm">
+                  <thead class="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-400">
+                    <tr>
+                      <th class="px-3 py-2 text-left">Zeit</th>
+                      <th class="px-3 py-2 text-left">Callsign</th>
+                      <th class="px-3 py-2 text-left">Hex</th>
+                      <th class="px-3 py-2 text-left">Reg</th>
+                      <th class="px-3 py-2 text-left">Type</th>
+                      <th class="px-3 py-2 text-left">GS</th>
+                      <th class="px-3 py-2 text-left">Alt</th>
+                      <th class="px-3 py-2 text-left">Lat</th>
+                      <th class="px-3 py-2 text-left">Lon</th>
+                      <th class="px-3 py-2 text-left">VR</th>
+                      <th class="px-3 py-2 text-left">Hdg</th>
+                      <th class="px-3 py-2 text-left">Last Seen</th>
+                    </tr>
+                  </thead>
+                  <tbody id="latestDataBody" class="divide-y divide-slate-800">
+                    <tr>
+                      <td colspan="12" class="px-3 py-4 text-center text-sm text-slate-400">Keine Daten vorhanden.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-events" data-tab class="hidden h-full overflow-y-auto">
+          <div id="eventsList" class="space-y-3 p-6 text-sm text-slate-300">
+            <p class="text-slate-400">Lade Events …</p>
+          </div>
+        </section>
+
+        <section id="tab-logs" data-tab class="hidden h-full overflow-y-auto">
+          <div class="space-y-4 p-6">
+            <div class="flex flex-col gap-3 sm:flex-row">
+              <input
+                id="logHexInput"
+                type="text"
+                placeholder="ICAO Hex"
+                class="flex-1 rounded-md border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+              />
+              <button
+                onclick="loadLogs()"
+                class="rounded-md border border-slate-700/60 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
+              >
+                Laden
+              </button>
+            </div>
+            <div id="logsList" class="space-y-3 text-sm text-slate-200">
+              <p class="text-slate-400">Keine Logs geladen.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-config" data-tab class="hidden h-full overflow-y-auto">
+          <div class="p-6">
+            <form class="space-y-6" onsubmit="saveConfig(event)">
+              <div>
+                <label for="configHex" class="text-xs font-semibold uppercase tracking-wide text-slate-400">Standard Hex</label>
+                <input
+                  id="configHex"
+                  type="text"
+                  class="mt-2 w-full rounded-md border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                  placeholder="ICAO Hex"
+                />
+              </div>
+              <div class="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <label for="configAltitude" class="text-xs font-semibold uppercase tracking-wide text-slate-400">Höhe (ft)</label>
+                  <input
+                    id="configAltitude"
+                    type="number"
+                    min="0"
+                    class="mt-2 w-full rounded-md border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label for="configGs" class="text-xs font-semibold uppercase tracking-wide text-slate-400">Ground Speed (kt)</label>
+                  <input
+                    id="configGs"
+                    type="number"
+                    min="0"
+                    class="mt-2 w-full rounded-md border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label for="configDuration" class="text-xs font-semibold uppercase tracking-wide text-slate-400">Dauer (s)</label>
+                  <input
+                    id="configDuration"
+                    type="number"
+                    min="0"
+                    class="mt-2 w-full rounded-md border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <button
+                  type="submit"
+                  class="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+                >
+                  Speichern
+                </button>
+                <span id="configStatus" class="text-sm text-slate-400"></span>
+              </div>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    let currentHex = "3e0fe9";
+    let tabSections = [];
+    let tabButtons = [];
+
+    function toggleSidebar(force) {
+      const sidebar = document.getElementById("sidebar");
+      const overlay = document.getElementById("overlay");
+      const isOpen = sidebar.classList.contains("translate-x-0");
+      const shouldOpen = typeof force === "boolean" ? force : !isOpen;
+
+      if (shouldOpen) {
+        sidebar.classList.add("translate-x-0");
+        sidebar.classList.remove("-translate-x-full");
+        overlay.classList.remove("hidden");
+      } else {
+        sidebar.classList.remove("translate-x-0");
+        sidebar.classList.add("-translate-x-full");
+        overlay.classList.add("hidden");
+      }
+    }
+
+    function setActiveButton(name) {
+      tabButtons.forEach(btn => {
+        const isActive = btn.dataset.tabButton === name;
+        btn.classList.toggle("bg-sky-600", isActive);
+        btn.classList.toggle("text-white", isActive);
+        btn.classList.toggle("border-sky-500/60", isActive);
+        btn.classList.toggle("bg-slate-800/60", !isActive);
+        btn.classList.toggle("text-slate-200", !isActive);
+        btn.classList.toggle("border-slate-700/60", !isActive);
+      });
+    }
+
+    function showTab(name) {
+      tabSections.forEach(section => {
+        section.classList.toggle("hidden", section.id !== `tab-${name}`);
+      });
+      setActiveButton(name);
+      if (name === "events") {
+        loadEvents();
+      } else if (name === "logs") {
+        loadLogs();
+      }
+      toggleSidebar(false);
+    }
+
+    function updateOverview(thresholds) {
+      document.getElementById("overviewAltitude").textContent = thresholds.altitude ?? "—";
+      document.getElementById("overviewGs").textContent = thresholds.groundSpeed ?? "—";
+      document.getElementById("overviewDuration").textContent = thresholds.duration ?? "—";
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch("/config");
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json();
+        currentHex = (data.hex || currentHex || "3e0fe9").toLowerCase();
+        document.getElementById("hexInput").value = currentHex;
+        document.getElementById("logHexInput").value = currentHex;
+        document.getElementById("configHex").value = currentHex;
+        document.getElementById("currentHex").textContent = currentHex;
+        updateMap(currentHex);
+        if (data.eventThresholds) {
+          const thresholds = {
+            altitude: data.eventThresholds.altitude,
+            groundSpeed: data.eventThresholds.groundSpeed,
+            duration: data.eventThresholds.duration
+          };
+          document.getElementById("configAltitude").value = thresholds.altitude ?? "";
+          document.getElementById("configGs").value = thresholds.groundSpeed ?? "";
+          document.getElementById("configDuration").value = thresholds.duration ?? "";
+          updateOverview(thresholds);
+        }
+      } catch (err) {
+        console.error("Konfiguration konnte nicht geladen werden:", err);
+      }
+    }
+
+    function updateMap(hex) {
+      const frame = document.getElementById("mapFrame");
+      if (frame) {
+        frame.src = `https://globe.adsbexchange.com/?icao=${hex}`;
+      }
+    }
+
+    async function setHex() {
+      const input = document.getElementById("hexInput");
+      const hex = input.value.trim();
+      const status = document.getElementById("hexStatus");
+      if (!hex) {
+        status.textContent = "Bitte ein ICAO Hex eingeben.";
+        return;
+      }
+      try {
+        const res = await fetch(`/set?hex=${encodeURIComponent(hex)}`);
+        if (!res.ok) throw new Error("Serverfehler");
+        currentHex = hex.toLowerCase();
+        status.textContent = `Ziel ${currentHex} gespeichert.`;
+        document.getElementById("currentHex").textContent = currentHex;
+        document.getElementById("logHexInput").value = currentHex;
+        document.getElementById("configHex").value = currentHex;
+        updateMap(currentHex);
+        setTimeout(() => (status.textContent = ""), 4000);
+      } catch (err) {
+        status.textContent = `Fehler: ${err.message}`;
+      }
+    }
+
+    function formatValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return "—";
+      }
+      return value;
+    }
+
+    function formatTime(value) {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString("de-DE");
+    }
+
+    async function updateLatest() {
+      try {
+        const res = await fetch("/latest");
+        if (!res.ok) throw new Error("Keine Antwort");
+        const data = await res.json();
+        renderLatestData(data);
+      } catch (err) {
+        console.error("Aktuelle Daten konnten nicht geladen werden:", err);
+      }
+    }
+
+    function renderLatestData(data) {
+      const tbody = document.getElementById("latestDataBody");
+      if (!data || !data.time) {
+        tbody.innerHTML = `<tr><td colspan="12" class="px-3 py-4 text-center text-sm text-slate-400">Keine Daten vorhanden.</td></tr>`;
+        document.getElementById("statusTimestamp").textContent = "—";
+        return;
+      }
+
+      const values = [
+        formatTime(data.time),
+        formatValue(data.callsign),
+        formatValue(data.hex),
+        formatValue(data.reg),
+        formatValue(data.type),
+        formatValue(data.gs),
+        formatValue(data.alt),
+        formatValue(data.lat),
+        formatValue(data.lon),
+        formatValue(data.vr),
+        formatValue(data.hdg),
+        formatValue(data.lastSeen)
+      ];
+
+      tbody.innerHTML = `<tr>${values
+        .map(value => `<td class=\"px-3 py-2 whitespace-nowrap\">${value}</td>`)
+        .join("")}</tr>`;
+
+      if (data.hex) {
+        currentHex = data.hex.toLowerCase();
+        document.getElementById("currentHex").textContent = currentHex;
+        document.getElementById("hexInput").value = currentHex;
+        document.getElementById("logHexInput").value = currentHex;
+        document.getElementById("configHex").value = currentHex;
+      }
+
+      document.getElementById("statusTimestamp").textContent = formatTime(data.time);
+    }
+
+    async function loadEvents() {
+      const container = document.getElementById("eventsList");
+      container.innerHTML = '<p class="text-slate-400">Lade Events …</p>';
+      try {
+        const res = await fetch("/events");
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) {
+          container.innerHTML = '<p class="text-slate-400">Keine Events vorhanden.</p>';
+          return;
+        }
+        container.innerHTML = data
+          .slice()
+          .reverse()
+          .map(event => {
+            const time = formatTime(event.time);
+            const title = event.type ? event.type.toUpperCase() : "EVENT";
+            const info = [
+              event.callsign || event.hex || "—",
+              event.alt !== undefined && event.alt !== null ? `Alt ${event.alt} ft` : null,
+              event.gs !== undefined && event.gs !== null ? `Speed ${event.gs} kt` : null
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            const position = event.lat && event.lon ? `${event.lat}, ${event.lon}` : "Keine Position";
+            return `<article class=\"rounded-lg border border-slate-800/80 bg-slate-900/70 p-4\">\
+<h4 class=\"text-xs font-semibold uppercase tracking-wide text-slate-400\">${title}</h4>\
+<p class=\"mt-1 text-sm text-slate-100\">${info}</p>\
+<p class=\"text-xs text-slate-400\">${position}</p>\
+<p class=\"mt-2 text-xs text-slate-500\">${time}</p>\
+</article>`;
+          })
+          .join("");
+      } catch (err) {
+        container.innerHTML = `<p class="text-red-400">Fehler beim Laden: ${err.message}</p>`;
+      }
+    }
+
+    async function loadLogs() {
+      const hexInput = document.getElementById("logHexInput");
+      const hex = hexInput.value.trim() || currentHex;
+      const container = document.getElementById("logsList");
+      if (!hex) {
+        container.innerHTML = '<p class="text-slate-400">Bitte ein ICAO Hex angeben.</p>';
+        return;
+      }
+      container.innerHTML = '<p class="text-slate-400">Lade Logs …</p>';
+      try {
+        const res = await fetch(`/log?hex=${encodeURIComponent(hex)}`);
+        const text = await res.text();
+        let data = [];
+        try {
+          data = JSON.parse(text || "[]");
+        } catch (err) {
+          data = [];
+        }
+        if (!Array.isArray(data) || data.length === 0) {
+          container.innerHTML = '<p class="text-slate-400">Keine Logs verfügbar.</p>';
+          return;
+        }
+        container.innerHTML = data
+          .slice(-200)
+          .reverse()
+          .map(entry => {
+            const time = formatTime(entry.time);
+            const position = entry.lat && entry.lon ? `${entry.lat}, ${entry.lon}` : "Keine Position";
+            return `<article class=\"rounded-lg border border-slate-800/80 bg-slate-900/70 p-4\">\
+<p class=\"text-sm font-semibold text-slate-100\">${entry.callsign || entry.hex || "—"}</p>\
+<p class=\"text-xs text-slate-400\">Alt ${formatValue(entry.alt)} ft · Speed ${formatValue(entry.gs)} kt</p>\
+<p class=\"text-xs text-slate-400\">${position}</p>\
+<p class=\"mt-2 text-xs text-slate-500\">${time}</p>\
+</article>`;
+          })
+          .join("");
+      } catch (err) {
+        container.innerHTML = `<p class="text-red-400">Fehler beim Laden: ${err.message}</p>`;
+      }
+    }
+
+    async function saveConfig(event) {
+      event.preventDefault();
+      const hex = document.getElementById("configHex").value.trim();
+      const payload = {
+        hex,
+        eventThresholds: {
+          altitude: Number(document.getElementById("configAltitude").value),
+          groundSpeed: Number(document.getElementById("configGs").value),
+          duration: Number(document.getElementById("configDuration").value)
+        }
+      };
+      const status = document.getElementById("configStatus");
+      status.textContent = "Speichern …";
+      try {
+        const res = await fetch("/config", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || res.statusText);
+        }
+        currentHex = (data.hex || hex || currentHex).toLowerCase();
+        document.getElementById("hexInput").value = currentHex;
+        document.getElementById("logHexInput").value = currentHex;
+        document.getElementById("currentHex").textContent = currentHex;
+        updateMap(currentHex);
+        if (data.eventThresholds) {
+          updateOverview(data.eventThresholds);
+          document.getElementById("configAltitude").value = data.eventThresholds.altitude ?? "";
+          document.getElementById("configGs").value = data.eventThresholds.groundSpeed ?? "";
+          document.getElementById("configDuration").value = data.eventThresholds.duration ?? "";
+        }
+        status.textContent = "Konfiguration gespeichert.";
+        setTimeout(() => (status.textContent = ""), 4000);
+      } catch (err) {
+        status.textContent = `Fehler: ${err.message}`;
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      tabSections = Array.from(document.querySelectorAll("[data-tab]"));
+      tabButtons = Array.from(document.querySelectorAll("[data-tab-button]"));
+      showTab("map");
+      loadConfig().then(() => {
+        updateLatest();
+      });
+      setInterval(updateLatest, 5000);
+    });
+  </script>
+</body>
+</html>
