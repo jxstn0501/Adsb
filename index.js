@@ -117,7 +117,7 @@ async function scrape() {
     const { lat, lon } = parsePos(data.pos);
     const record = {
       time: data.time,
-      hex: data.hex,
+      hex: data.hex.toLowerCase(),
       callsign: data.callsign,
       reg: data.reg,
       type: data.type,
@@ -197,10 +197,17 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(latestData));
 
   } else if (q.pathname === "/log") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    if (q.query.hex && db[q.query.hex]) {
-      res.end(JSON.stringify(db[q.query.hex]));
+    const hex = q.query.hex ? q.query.hex.toLowerCase() : null;
+    if (hex) {
+      if (db[hex]) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(db[hex]));
+      } else {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end("[]");
+      }
     } else {
+      res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(db));
     }
 
