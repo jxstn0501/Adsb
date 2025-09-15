@@ -11,7 +11,7 @@ let page;
 let targetHex = "3e0fe9"; // Fallback
 let latestData = {};      // letzter Datensatz fürs aktuelle Ziel
 let events = [];          // Takeoff/Landing-Events
-let flightStatus = {};    // Status pro Flugzeug ("online"/"offline")
+let flightStatus = {};    // Status- & Verlaufdaten pro Flugzeug
 const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
 const logCounts = {};     // Zeilenanzahl pro Hex-Datei
@@ -70,50 +70,120 @@ function parseLastSeen(raw) {
   return isNaN(sec) ? null : sec;
 }
 
+const ALTITUDE_THRESHOLD_FT = 300;
+const EVENT_WINDOW_MS = 60 * 1000;
+
+function ensureFlightState(hex) {
+  if (!flightStatus[hex]) {
+    flightStatus[hex] = {
+      status: "offline",
+      lastStatusChange: null,
+      lastAboveThreshold: null,
+      lastBelowThreshold: null,
+      pendingTakeoff: null,
+      hasSeen: false
+    };
+  }
+  return flightStatus[hex];
+}
+
+function registerEvent(type, record) {
+  const event = {
+    time: record.time,
+    type,
+    hex: record.hex,
+    callsign: record.callsign,
+    lat: record.lat,
+    lon: record.lon,
+    alt: record.alt,
+    gs: record.gs,
+    lastSeen: record.lastSeen
+  };
+  events.push(event);
+  fs.writeFileSync("events.json", JSON.stringify(events, null, 2));
+  console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
+}
+
 // ===== Event Detection =====
 function detectEventByLastSeen(record) {
   const hex = record.hex;
   if (!hex) return;
 
+  const state = ensureFlightState(hex);
+  const isFirstRecord = !state.hasSeen;
+
+  const timestamp = Date.parse(record.time);
+  if (Number.isNaN(timestamp)) {
+    console.warn("⚠️ Ungültiger Zeitstempel für", hex, record.time);
+    return state.status;
+  }
+
   const lastSeenSec = record.lastSeen;
   if (lastSeenSec === null) {
     console.warn("⚠️ lastSeen fehlt für", hex);
-    return;
   }
 
-  const prev = flightStatus[hex] || "offline";
-  let now = prev;
+  const prevStatus = state.status;
+  let now = prevStatus;
 
-  if (lastSeenSec < 10 &&
-      ((record.alt !== null && record.alt > 100) ||
-       (record.vr !== null && record.vr > 0))) {
-    now = "online";
-  } else if (lastSeenSec > 50 &&
-             ((record.alt !== null && record.alt < 100) ||
-              (record.vr !== null && record.vr <= 0))) {
-    now = "offline";
+  if (lastSeenSec !== null) {
+    if (lastSeenSec < 10 &&
+        ((record.alt !== null && record.alt > 100) ||
+         (record.vr !== null && record.vr > 0))) {
+      now = "online";
+    } else if (lastSeenSec > 50 &&
+               ((record.alt !== null && record.alt < 100) ||
+                (record.vr !== null && record.vr <= 0))) {
+      now = "offline";
+    }
   }
 
-  if (now !== prev) {
-    const type = now === "online" ? "takeoff" : "landing";
-    const event = {
-      time: record.time,
-      type,
-      hex: record.hex,
-      callsign: record.callsign,
-      lat: record.lat,
-      lon: record.lon,
-      alt: record.alt,
-      gs: record.gs,
-      lastSeen: record.lastSeen
-    };
-    events.push(event);
-    fs.writeFileSync("events.json", JSON.stringify(events, null, 2));
-    console.log("✈️ Event erkannt:", type, record.callsign, "LastSeen:", record.lastSeen);
+  if (record.alt !== null) {
+    if (record.alt > ALTITUDE_THRESHOLD_FT) {
+      state.lastAboveThreshold = timestamp;
+    } else if (record.alt < ALTITUDE_THRESHOLD_FT) {
+      state.lastBelowThreshold = timestamp;
+    }
   }
 
-  flightStatus[hex] = now;
-  return flightStatus[hex];
+  if (now !== prevStatus) {
+    state.status = now;
+    state.lastStatusChange = timestamp;
+
+    if (now === "online") {
+      const skipInitialAirborne = isFirstRecord && record.alt !== null && record.alt > ALTITUDE_THRESHOLD_FT;
+      state.pendingTakeoff = {
+        changeTime: timestamp,
+        skipInitialAirborne
+      };
+    } else {
+      state.pendingTakeoff = null;
+
+      if (prevStatus === "online" &&
+          state.lastBelowThreshold !== null &&
+          timestamp - state.lastBelowThreshold <= EVENT_WINDOW_MS) {
+        registerEvent("landing", record);
+      }
+    }
+  }
+
+  if (state.pendingTakeoff) {
+    const { changeTime, skipInitialAirborne } = state.pendingTakeoff;
+
+    if (timestamp - changeTime <= EVENT_WINDOW_MS) {
+      if (record.alt !== null && record.alt > ALTITUDE_THRESHOLD_FT) {
+        if (!skipInitialAirborne) {
+          registerEvent("takeoff", record);
+        }
+        state.pendingTakeoff = null;
+      }
+    } else {
+      state.pendingTakeoff = null;
+    }
+  }
+
+  state.hasSeen = true;
+  return state.status;
 }
 
 // ===== Scraper =====
