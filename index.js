@@ -2,21 +2,40 @@ const http = require("http");
 const fs = require("fs");
 const url = require("url");
 const path = require("path");
+const readline = require("readline");
 const puppeteer = require("puppeteer");
 const { exec } = require("node:child_process");
 const { promisify } = require("node:util");
 
 let page;
 let targetHex = "3e0fe9"; // Fallback
-let db = {};              // Logs: { hex: [records] }
 let latestData = {};      // letzter Datensatz fürs aktuelle Ziel
 let events = [];          // Takeoff/Landing-Events
 let flightStatus = {};    // Status pro Flugzeug ("online"/"offline")
+const fsp = fs.promises;
+const logsDir = path.join(__dirname, "logs");
+const logCounts = {};     // Zeilenanzahl pro Hex-Datei
 
 // ===== State loading =====
+fs.mkdirSync(logsDir, { recursive: true });
+
 try {
-  const savedDb = fs.readFileSync("adsb_log.json", "utf8");
-  db = JSON.parse(savedDb);
+  const files = fs.readdirSync(logsDir);
+  files
+    .filter(name => name.toLowerCase().endsWith(".jsonl"))
+    .forEach(file => {
+      const hex = path.basename(file, ".jsonl");
+      try {
+        const contents = fs.readFileSync(path.join(logsDir, file), "utf8");
+        const lines = contents
+          .split(/\r?\n/)
+          .filter(line => line.trim().length > 0);
+        logCounts[hex] = lines.length;
+      } catch (err) {
+        console.error("⚠️ Log-Datei konnte nicht gelesen werden:", file, err.message);
+        logCounts[hex] = logCounts[hex] || 0;
+      }
+    });
 } catch (e) {}
 try {
   const savedEvents = fs.readFileSync("events.json", "utf8");
@@ -154,17 +173,118 @@ async function scrape() {
 
     // Logging nur wenn online
     if (status === "online") {
-      if (!db[record.hex]) db[record.hex] = [];
-      db[record.hex].push(record);
-      if (db[record.hex].length > 5000) {
-        db[record.hex] = db[record.hex].slice(-5000);
-      }
-      fs.writeFileSync("adsb_log.json", JSON.stringify(db, null, 2));
+      await appendLogRecord(record);
     }
 
   } catch (err) {
     console.error("❌ Scrape-Fehler:", err.message);
   }
+}
+
+async function appendLogRecord(record) {
+  const hex = record.hex;
+  const filePath = path.join(logsDir, `${hex}.jsonl`);
+  const line = JSON.stringify(record);
+
+  try {
+    await fsp.appendFile(filePath, line + "\n");
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      await fsp.mkdir(logsDir, { recursive: true });
+      await fsp.appendFile(filePath, line + "\n");
+    } else {
+      throw err;
+    }
+  }
+
+  logCounts[hex] = (logCounts[hex] || 0) + 1;
+
+  if (logCounts[hex] > 5000) {
+    try {
+      const contents = await fsp.readFile(filePath, "utf8");
+      const lines = contents
+        .split(/\r?\n/)
+        .filter(entry => entry.trim().length > 0);
+      const trimmed = lines.slice(-5000);
+      logCounts[hex] = trimmed.length;
+      const payload = trimmed.join("\n") + (trimmed.length ? "\n" : "");
+      await fsp.writeFile(filePath, payload);
+    } catch (err) {
+      console.error("⚠️ Kürzen der Log-Datei fehlgeschlagen für", hex, err.message);
+    }
+  }
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+async function handleLogRequest(q, res) {
+  const hex = q.query.hex ? q.query.hex.toLowerCase() : null;
+  if (!hex) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Parameter 'hex' wird benötigt." }));
+    return;
+  }
+
+  const page = parsePositiveInt(q.query.page, 1);
+  const limit = parsePositiveInt(q.query.limit, 100);
+  const filePath = path.join(logsDir, `${hex}.jsonl`);
+
+  try {
+    await fsp.access(filePath, fs.constants.F_OK);
+  } catch (err) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: [], page, totalPages: 0, total: 0, limit }));
+    return;
+  }
+
+  try {
+    const payload = await paginateLogFile(filePath, page, limit);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ...payload, page, limit }));
+  } catch (err) {
+    console.error("❌ Fehler beim Lesen der Log-Datei:", err.message);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Log-Datei konnte nicht gelesen werden." }));
+  }
+}
+
+function paginateLogFile(filePath, page, limit) {
+  return new Promise((resolve, reject) => {
+    const input = fs.createReadStream(filePath);
+    input.on("error", reject);
+
+    const rl = readline.createInterface({ input, crlfDelay: Infinity });
+    const data = [];
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    let index = 0;
+
+    rl.on("line", line => {
+      if (!line.trim()) {
+        return;
+      }
+      if (index >= startIndex && index < endIndex) {
+        try {
+          data.push(JSON.parse(line));
+        } catch (err) {
+          console.warn("⚠️ Ungültige Log-Zeile in", filePath, err.message);
+        }
+      }
+      index += 1;
+    });
+
+    rl.on("close", () => {
+      const total = index;
+      const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+      resolve({ data, total, totalPages });
+    });
+
+    rl.on("error", reject);
+  });
 }
 
 // ===== Browser Start =====
@@ -213,19 +333,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(latestData));
 
   } else if (q.pathname === "/log") {
-    const hex = q.query.hex ? q.query.hex.toLowerCase() : null;
-    if (hex) {
-      if (db[hex]) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(db[hex]));
-      } else {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end("[]");
-      }
-    } else {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(db));
-    }
+    return handleLogRequest(q, res);
 
   } else if (q.pathname === "/events") {
     res.writeHead(200, { "Content-Type": "application/json" });
