@@ -356,7 +356,22 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(latestData));
 
   } else if (q.pathname === "/log") {
+
     return handleLogRequest(q, res);
+    const hex = q.query.hex ? q.query.hex.toLowerCase() : null;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (hex) {
+      const records = db[hex] || [];
+      if (records.length === 0) {
+        console.warn("ℹ️  /log keine Daten für", hex);
+      } else {
+        console.log("📨 /log Anfrage für", hex, "->", records.length, "Einträge");
+      }
+      res.end(JSON.stringify(records));
+    } else {
+      console.log("📨 /log Anfrage ohne hex -> vollständige Datenbank (", Object.keys(db).length, "Hex-Codes)");
+      res.end(JSON.stringify(db));
+    }
 
   } else if (q.pathname === "/events") {
     res.writeHead(200, { "Content-Type": "application/json" });
