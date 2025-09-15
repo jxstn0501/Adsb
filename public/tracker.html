@@ -147,19 +147,32 @@
 
     async function showLogs() {
       const hex = document.getElementById("hexInput").value.trim() || "3e0fe9";
-      const r = await fetch(`/log?hex=${encodeURIComponent(hex)}`);
-      const data = await r.json();
+      console.log("[Logs] Lade Daten für", hex);
       let html = '<div class="logs">';
-      if (!Array.isArray(data) || data.length === 0) {
-        html += 'keine Daten gefunden';
-      } else {
-        data.slice(-200).forEach(d => {
-          html += `<div class="log-entry">
+      try {
+        const r = await fetch(`/log?hex=${encodeURIComponent(hex)}`);
+        console.log("[Logs] Antwortstatus:", r.status);
+        if (!r.ok) {
+          throw new Error(`Serverantwort ${r.status}`);
+        }
+        const data = await r.json();
+        console.log("[Logs] Antwortgröße:", Array.isArray(data) ? data.length : data);
+        if (!Array.isArray(data) || data.length === 0) {
+          console.warn(`[Logs] Keine Daten für ${hex} erhalten.`);
+          html += 'keine Daten gefunden';
+        } else {
+          console.log(`[Logs] Verarbeite ${Math.min(data.length, 200)} von ${data.length} Einträgen.`);
+          data.slice(-200).forEach(d => {
+            html += `<div class="log-entry">
           ${d.callsign||d.hex} – Alt ${d.alt||'—'} ft, Speed ${d.gs||'—'} kt<br>
           Pos: ${d.lat}, ${d.lon}<br>
           <small>${d.time}</small>
         </div>`;
-        });
+          });
+        }
+      } catch (err) {
+        console.error("[Logs] Fehler beim Laden der Logs:", err);
+        html += `Fehler beim Laden der Logs (${err.message})`;
       }
       html += '</div>';
       document.getElementById("content").innerHTML = html;
