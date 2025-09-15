@@ -57,13 +57,23 @@ function detectEventByLastSeen(record) {
   if (!hex) return;
 
   const lastSeenSec = record.lastSeen;
-  if (lastSeenSec === null) return;
+  if (lastSeenSec === null) {
+    console.warn("⚠️ lastSeen fehlt für", hex);
+    return;
+  }
 
   const prev = flightStatus[hex] || "offline";
   let now = prev;
 
-  if (lastSeenSec < 10) now = "online";
-  else if (lastSeenSec > 50) now = "offline";
+  if (lastSeenSec < 10 &&
+      ((record.alt !== null && record.alt > 100) ||
+       (record.vr !== null && record.vr > 0))) {
+    now = "online";
+  } else if (lastSeenSec > 50 &&
+             ((record.alt !== null && record.alt < 100) ||
+              (record.vr !== null && record.vr <= 0))) {
+    now = "offline";
+  }
 
   if (now !== prev) {
     const type = now === "online" ? "takeoff" : "landing";
@@ -97,6 +107,8 @@ async function scrape() {
       const hexRaw = get("#selected_icao") || "";
       const hex = hexRaw.replace(/Hex:\s*/i, "").split(/\s+/)[0] || null;
 
+      const lastSeen = get("#selected_seen_pos") || get("#selected_seen");
+
       return {
         time: new Date().toISOString(),
         callsign: get("#selected_callsign"),
@@ -108,7 +120,7 @@ async function scrape() {
         pos: get("#selected_position"),
         vr: get("#selected_vert_rate"),
         hdg: get("#selected_track1"),
-        lastSeen: get("#selected_seen_pos") // <- Feld in ADSBExchange
+        lastSeen // ggf. anderer Selektor
       };
     });
 
@@ -129,6 +141,10 @@ async function scrape() {
       lon,
       lastSeen: parseLastSeen(data.lastSeen)
     };
+
+    if (record.lastSeen === null) {
+      console.warn("⚠️ lastSeen konnte nicht ermittelt werden für", record.hex);
+    }
 
     latestData = record;
     fs.writeFileSync("latest.json", JSON.stringify(latestData, null, 2));
