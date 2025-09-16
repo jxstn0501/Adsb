@@ -359,6 +359,28 @@
         `<iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"></iframe>`;
     }
 
+    function openMap(lat, lon) {
+      stopSettingsInterval();
+
+      if (lat === null || lat === undefined || lon === null || lon === undefined) {
+        document.getElementById("content").innerHTML = '<div class="logs">Ungültige Koordinaten für diese Landung.</div>';
+        return;
+      }
+
+      const latNum = typeof lat === "number" ? lat : Number(lat);
+      const lonNum = typeof lon === "number" ? lon : Number(lon);
+
+      if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
+        document.getElementById("content").innerHTML = '<div class="logs">Ungültige Koordinaten für diese Landung.</div>';
+        return;
+      }
+
+      const latStr = latNum.toFixed(6);
+      const lonStr = lonNum.toFixed(6);
+      const src = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latStr)}&mlon=${encodeURIComponent(lonStr)}#map=15/${encodeURIComponent(latStr)}/${encodeURIComponent(lonStr)}`;
+      document.getElementById("content").innerHTML = `<iframe src="${src}" title="OpenStreetMap"></iframe>`;
+    }
+
     function toggleSidebar() {
       document.getElementById("sidebar").classList.toggle("active");
       document.getElementById("overlay").classList.toggle("active");
@@ -396,12 +418,27 @@
           html += 'keine Events gefunden';
         } else {
           data.forEach(ev => {
-            html += `<div class="log-entry">
-          <b>${escapeHtml(ev.type || '').toUpperCase()}</b> – ${escapeHtml(ev.callsign||ev.hex||'—')}<br>
+            const typeRaw = typeof ev.type === "string" ? ev.type : "";
+            const type = typeRaw.toLowerCase();
+            const latNum = Number(ev.lat);
+            const lonNum = Number(ev.lon);
+            const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+            const latParam = hasCoords ? latNum.toFixed(6) : "null";
+            const lonParam = hasCoords ? lonNum.toFixed(6) : "null";
+            const place = ev && ev.place && (ev.place.name || ev.place.type)
+              ? `<br>Ort: ${ev.place.name ? escapeHtml(ev.place.name) : "—"}${ev.place.type ? ` (${escapeHtml(ev.place.type)})` : ""}`
+              : "";
+
+            const entryContent = `<b>${escapeHtml(typeRaw || '').toUpperCase()}</b> – ${escapeHtml(ev.callsign||ev.hex||'—')}<br>
           Alt: ${escapeHtml(ev.alt||'—')} ft | Speed: ${escapeHtml(ev.gs||'—')} kt<br>
-          ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}<br>
-          <small>${escapeHtml(ev.time||'')}</small>
-        </div>`;
+          ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}${place}<br>
+          <small>${escapeHtml(ev.time||'')}</small>`;
+
+            if (type === "landing") {
+              html += `<button type="button" class="log-entry landing-entry" onclick="openMap(${latParam}, ${lonParam})">${entryContent}</button>`;
+            } else {
+              html += `<div class="log-entry">${entryContent}</div>`;
+            }
           });
         }
       } catch (err) {
