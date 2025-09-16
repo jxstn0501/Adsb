@@ -77,6 +77,32 @@
     iframe {
       border: none; width: 100%; height: 100%;
     }
+    .map-view {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+    }
+    .map-view iframe {
+      flex: 1 1 auto;
+      width: 100%;
+      border: none;
+    }
+    .map-link {
+      margin: 0;
+      padding: 12px 16px;
+      background: #f2f2f7;
+      text-align: center;
+      font-size: 14px;
+    }
+    .map-link a {
+      color: #ff3b30;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .map-link a:hover {
+      text-decoration: underline;
+    }
     .logs {
       padding: 10px; color: #111; background: #f2f2f7;
       overflow-y: auto; height: 100%;
@@ -85,6 +111,15 @@
       background: #fff; margin: 6px 0; padding: 8px 10px;
       border-radius: 12px; font-size: 14px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button.log-entry {
+      border: none;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+    }
+    button.log-entry:focus {
+      outline: none;
     }
 
     .settings {
@@ -361,9 +396,15 @@
 
     function openMap(lat, lon) {
       stopSettingsInterval();
+      closeSidebar();
+
+      const target = document.getElementById("content");
+      if (!target) return;
+
+      const invalidMessage = '<div class="logs">Ungültige Koordinaten für dieses Event.</div>';
 
       if (lat === null || lat === undefined || lon === null || lon === undefined) {
-        document.getElementById("content").innerHTML = '<div class="logs">Ungültige Koordinaten für diese Landung.</div>';
+        target.innerHTML = invalidMessage;
         return;
       }
 
@@ -371,14 +412,40 @@
       const lonNum = typeof lon === "number" ? lon : Number(lon);
 
       if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
-        document.getElementById("content").innerHTML = '<div class="logs">Ungültige Koordinaten für diese Landung.</div>';
+        target.innerHTML = invalidMessage;
         return;
+      }
+
+      const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+      const latPadding = 0.01;
+      const lonPadding = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)) * 0.02);
+
+      const minLat = clamp(latNum - latPadding, -90, 90);
+      const maxLat = clamp(latNum + latPadding, -90, 90);
+      let minLon = clamp(lonNum - lonPadding, -180, 180);
+      let maxLon = clamp(lonNum + lonPadding, -180, 180);
+
+      if (minLon > maxLon) {
+        const swap = minLon;
+        minLon = maxLon;
+        maxLon = swap;
       }
 
       const latStr = latNum.toFixed(6);
       const lonStr = lonNum.toFixed(6);
-      const src = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latStr)}&mlon=${encodeURIComponent(lonStr)}#map=15/${encodeURIComponent(latStr)}/${encodeURIComponent(lonStr)}`;
-      document.getElementById("content").innerHTML = `<iframe src="${src}" title="OpenStreetMap"></iframe>`;
+      const bbox = [minLon, minLat, maxLon, maxLat].map(value => value.toFixed(6));
+      const bboxParam = bbox.map(value => encodeURIComponent(value)).join("%2C");
+      const markerParam = `${encodeURIComponent(latStr)}%2C${encodeURIComponent(lonStr)}`;
+      const embedSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${bboxParam}&layer=mapnik&marker=${markerParam}`;
+      const externalLink = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latStr)}&mlon=${encodeURIComponent(lonStr)}#map=15/${encodeURIComponent(latStr)}/${encodeURIComponent(lonStr)}`;
+
+      target.innerHTML = `
+        <div class="map-view">
+          <iframe src="${embedSrc}" title="OpenStreetMap" loading="lazy"></iframe>
+          <p class="map-link">Marker bei ${escapeHtml(latStr)}, ${escapeHtml(lonStr)} –
+            <a href="${externalLink}" target="_blank" rel="noopener">In OpenStreetMap öffnen</a>
+          </p>
+        </div>`;
     }
 
     function toggleSidebar() {
@@ -434,8 +501,9 @@
           ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}${place}<br>
           <small>${escapeHtml(ev.time||'')}</small>`;
 
-            if (type === "landing") {
-              html += `<button type="button" class="log-entry landing-entry" onclick="openMap(${latParam}, ${lonParam})">${entryContent}</button>`;
+            if (hasCoords) {
+              const buttonClass = type === "landing" ? "landing-entry" : "takeoff-entry";
+              html += `<button type="button" class="log-entry ${buttonClass} event-entry" onclick="openMap(${latParam}, ${lonParam})">${entryContent}</button>`;
             } else {
               html += `<div class="log-entry">${entryContent}</div>`;
             }
@@ -672,9 +740,9 @@
             <div id="placeSearchStatus" class="search-status"></div>
             <div id="placeSearchResults" class="search-results"></div>
             <label for="placeLat">Breite (Lat)</label>
-            <input id="placeLat" type="number" step="0.0001" min="-90" max="90" required />
+            <input id="placeLat" type="number" step="any" min="-90" max="90" required />
             <label for="placeLon">Länge (Lon)</label>
-            <input id="placeLon" type="number" step="0.0001" min="-180" max="180" required />
+            <input id="placeLon" type="number" step="any" min="-180" max="180" required />
             <div class="button-row">
               <button type="submit" id="placeSubmit" class="primary-button">Hinzufügen</button>
               <button type="button" id="placeCancel" class="button-secondary" onclick="cancelPlaceEdit()">Abbrechen</button>
@@ -1184,7 +1252,8 @@
       if (typeof value === "string") {
         const trimmed = value.trim();
         if (!trimmed) return null;
-        const parsed = Number(trimmed);
+        const normalized = trimmed.replace(/\s+/g, "").replace(/,/g, ".");
+        const parsed = Number(normalized);
         return Number.isFinite(parsed) ? parsed : null;
       }
       return null;
