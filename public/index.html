@@ -162,6 +162,78 @@
       font-size: 14px;
     }
     .settings th { background: #f2f2f7; }
+    .settings .search-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    .settings .search-row input {
+      flex: 1;
+    }
+    .settings .search-row button {
+      flex-shrink: 0;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      background: #2c2c2e;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .settings .search-row button:hover { background: #3a3a3c; }
+    .settings .search-status {
+      font-size: 13px;
+      color: #666;
+      margin: 6px 0;
+      min-height: 18px;
+    }
+    .settings .search-status.success { color: #34c759; }
+    .settings .search-status.error { color: #ff3b30; }
+    .settings .search-results {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .settings .search-result {
+      border: 1px solid #d1d1d6;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #f9f9fb;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .settings .search-result.selected {
+      border-color: #ff3b30;
+      box-shadow: 0 0 0 2px rgba(255,59,48,0.15);
+    }
+    .settings .search-result-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .settings .search-result-coords {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .settings .search-result small {
+      color: #666;
+      display: block;
+    }
+    .settings .search-result button {
+      margin-top: 8px;
+      border: none;
+      border-radius: 6px;
+      background: #ff3b30;
+      color: #fff;
+      padding: 6px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+    .settings .search-result button:hover { opacity: 0.9; }
     .settings .place-actions { display: flex; gap: 6px; }
     .settings .action-btn {
       padding: 6px 10px;
@@ -208,6 +280,9 @@
     let currentConfigCache = null;
     let currentPlaces = [];
     let editingPlaceId = null;
+    let nominatimResults = [];
+    let nominatimSelectedIndex = null;
+    let nominatimSearchToken = 0;
 
     window.addEventListener("DOMContentLoaded", initializeTracker);
 
@@ -483,6 +558,13 @@
             <input id="placeName" type="text" required />
             <label for="placeType">Typ</label>
             <input id="placeType" type="text" required />
+            <label for="placeSearch">Ortssuche</label>
+            <div class="search-row">
+              <input id="placeSearch" type="text" placeholder="Adresse, Stadt oder Ort" onkeydown="handlePlaceSearchKey(event)" />
+              <button type="button" onclick="searchPlaceInOSM()">Search OSM</button>
+            </div>
+            <div id="placeSearchStatus" class="search-status"></div>
+            <div id="placeSearchResults" class="search-results"></div>
             <label for="placeLat">Breite (Lat)</label>
             <input id="placeLat" type="number" step="0.0001" min="-90" max="90" required />
             <label for="placeLon">Länge (Lon)</label>
@@ -497,6 +579,8 @@
       </div>`;
 
       container.innerHTML = html;
+
+      clearPlaceSearchResults();
 
       const altitudeInput = document.getElementById("cfgAltitude");
       if (altitudeInput) {
@@ -603,6 +687,7 @@
       if (form) {
         form.reset();
       }
+      clearPlaceSearchResults();
     }
 
     function startEditPlace(id) {
@@ -612,6 +697,7 @@
       if (!place) return;
 
       editingPlaceId = targetId;
+      clearPlaceSearchResults();
       const nameInput = document.getElementById("placeName");
       const typeInput = document.getElementById("placeType");
       const latInput = document.getElementById("placeLat");
@@ -801,6 +887,155 @@
         console.error("[Places] Aktualisierung fehlgeschlagen:", err);
         showPlaceMessage(`Fehler beim Aktualisieren der Orte: ${err.message}`, "error");
       }
+    }
+
+    function updatePlaceSearchStatus(message, type = "") {
+      const el = document.getElementById("placeSearchStatus");
+      if (!el) return;
+      el.textContent = message || "";
+      const normalizedType = type === "success" || type === "error" ? type : "";
+      el.className = normalizedType ? `search-status ${normalizedType}` : "search-status";
+    }
+
+    function renderPlaceSearchResults(list = nominatimResults) {
+      const container = document.getElementById("placeSearchResults");
+      if (!container) return;
+
+      if (!Array.isArray(list) || list.length === 0) {
+        container.innerHTML = "";
+        return;
+      }
+
+      const html = list.map((entry, index) => {
+        if (!entry) return "";
+        const classes = index === nominatimSelectedIndex ? "search-result selected" : "search-result";
+        const typeLabel = entry.typeLabel || "";
+        const classLabel = entry.classLabel || "";
+        const detailParts = [];
+        if (typeLabel) {
+          detailParts.push(escapeHtml(typeLabel));
+        }
+        if (classLabel && classLabel.toLowerCase() !== typeLabel.toLowerCase()) {
+          detailParts.push(escapeHtml(classLabel));
+        }
+        const detailHtml = detailParts.length ? `<small>${detailParts.join(" • ")}</small>` : "";
+        const coords = `${formatCoordinate(entry.lat)}, ${formatCoordinate(entry.lon)}`;
+        return `<div class="${classes}">
+          <div class="search-result-title">${escapeHtml(entry.displayName || "")}</div>
+          <div class="search-result-coords">${coords}</div>
+          ${detailHtml}
+          <button type="button" onclick="applyNominatimResult(${index})">Koordinaten übernehmen</button>
+        </div>`;
+      }).join("");
+
+      container.innerHTML = html;
+    }
+
+    function clearPlaceSearchResults() {
+      nominatimResults = [];
+      nominatimSelectedIndex = null;
+      nominatimSearchToken += 1;
+      renderPlaceSearchResults([]);
+      updatePlaceSearchStatus("", "");
+    }
+
+    async function searchPlaceInOSM() {
+      const input = document.getElementById("placeSearch");
+      if (!input) return;
+
+      const query = input.value ? input.value.trim() : "";
+      if (!query) {
+        clearPlaceSearchResults();
+        updatePlaceSearchStatus("Bitte einen Suchbegriff eingeben.", "error");
+        return;
+      }
+
+      const requestId = ++nominatimSearchToken;
+      nominatimSelectedIndex = null;
+      nominatimResults = [];
+      renderPlaceSearchResults([]);
+      updatePlaceSearchStatus("Suche in OpenStreetMap...", "");
+
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`;
+        const res = await fetch(url, { headers: { "Accept": "application/json" } });
+        if (!res.ok) {
+          throw new Error(`Antwort ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (requestId !== nominatimSearchToken) {
+          return;
+        }
+
+        if (!Array.isArray(data) || data.length === 0) {
+          nominatimResults = [];
+          renderPlaceSearchResults([]);
+          updatePlaceSearchStatus("Keine Ergebnisse gefunden.", "error");
+          return;
+        }
+
+        const normalized = data
+          .filter(item => item && item.lat !== undefined && item.lon !== undefined)
+          .map(item => {
+            const lat = Number(item.lat);
+            const lon = Number(item.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+              return null;
+            }
+            const displayName = (item.display_name || item.name || "").trim() || "Unbenannt";
+            const typeLabel = item.type ? String(item.type).replace(/_/g, " ") : "";
+            const classLabel = item.class ? String(item.class).replace(/_/g, " ") : "";
+            return { displayName, lat, lon, typeLabel, classLabel };
+          })
+          .filter(Boolean);
+
+        nominatimResults = normalized.slice(0, 10);
+        if (nominatimResults.length === 0) {
+          renderPlaceSearchResults([]);
+          updatePlaceSearchStatus("Keine Ergebnisse gefunden.", "error");
+          return;
+        }
+
+        renderPlaceSearchResults(nominatimResults);
+        updatePlaceSearchStatus(`${nominatimResults.length} Ergebnis(se) gefunden.`, "success");
+      } catch (err) {
+        if (requestId !== nominatimSearchToken) {
+          return;
+        }
+        console.error("[Places] OSM-Suche fehlgeschlagen:", err);
+        nominatimResults = [];
+        renderPlaceSearchResults([]);
+        const message = err && err.message ? err.message : String(err);
+        updatePlaceSearchStatus(`Suche fehlgeschlagen: ${message}`, "error");
+      }
+    }
+
+    function handlePlaceSearchKey(event) {
+      if (event && event.key === "Enter") {
+        event.preventDefault();
+        searchPlaceInOSM();
+      }
+    }
+
+    function applyNominatimResult(index) {
+      if (!Array.isArray(nominatimResults) || index < 0 || index >= nominatimResults.length) {
+        return;
+      }
+
+      const entry = nominatimResults[index];
+      const latInput = document.getElementById("placeLat");
+      const lonInput = document.getElementById("placeLon");
+      if (latInput) {
+        latInput.value = Number.isFinite(entry.lat) ? entry.lat.toFixed(6) : entry.lat;
+      }
+      if (lonInput) {
+        lonInput.value = Number.isFinite(entry.lon) ? entry.lon.toFixed(6) : entry.lon;
+      }
+
+      nominatimSelectedIndex = index;
+      renderPlaceSearchResults();
+      updatePlaceSearchStatus(`Koordinaten übernommen: ${entry.displayName}`, "success");
     }
 
     function showConfigMessage(message, type = "") {
