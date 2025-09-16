@@ -7,6 +7,7 @@ const puppeteer = require("puppeteer");
 const { exec } = require("node:child_process");
 const { promisify } = require("node:util");
 
+let browser;
 let page;
 let targetHex = "3e0fe9"; // Fallback
 let latestData = {};      // letzter Datensatz fürs aktuelle Ziel
@@ -28,9 +29,9 @@ const DEFAULT_CONFIG = {
 let config = { ...DEFAULT_CONFIG };
 
 // ===== Places storage =====
-function loadPlacesFromDisk() {
+async function loadPlacesFromDisk() {
   try {
-    const raw = fs.readFileSync(placesPath, "utf8");
+    const raw = await fsp.readFile(placesPath, "utf8");
     if (!raw.trim()) {
       places = [];
       return;
@@ -45,7 +46,7 @@ function loadPlacesFromDisk() {
   } catch (err) {
     if (err.code === "ENOENT") {
       try {
-        fs.writeFileSync(placesPath, JSON.stringify([], null, 2));
+        await fsp.writeFile(placesPath, JSON.stringify([], null, 2));
         places = [];
       } catch (writeErr) {
         console.error("❌ places.json konnte nicht erstellt werden:", writeErr.message);
@@ -64,7 +65,7 @@ function getPlaces() {
     : [];
 }
 
-function savePlaces(list) {
+async function savePlaces(list) {
   if (!Array.isArray(list)) {
     throw new TypeError("Places list must be an array.");
   }
@@ -72,18 +73,16 @@ function savePlaces(list) {
   const serialized = JSON.stringify(list, null, 2);
   const parsed = JSON.parse(serialized);
   places = parsed;
-  fs.writeFileSync(placesPath, serialized);
+  await fsp.writeFile(placesPath, serialized);
   return getPlaces();
 }
 
 function startPlacesWatcher() {
   try {
     fs.watchFile(placesPath, { interval: 1000 }, () => {
-      try {
-        loadPlacesFromDisk();
-      } catch (err) {
+      loadPlacesFromDisk().catch(err => {
         console.error("⚠️ places.json konnte nicht neu geladen werden:", err.message);
-      }
+      });
     });
   } catch (err) {
     console.error("⚠️ Beobachten von places.json fehlgeschlagen:", err.message);
@@ -97,31 +96,19 @@ function normalizeConfig(raw) {
     return normalized;
   }
 
-  if (Object.prototype.hasOwnProperty.call(raw, "altitudeThresholdFt")) {
-    const value = Number(raw.altitudeThresholdFt);
-    if (Number.isFinite(value) && value > 0) {
-      normalized.altitudeThresholdFt = value;
-    }
-  } else if (Object.prototype.hasOwnProperty.call(config, "altitudeThresholdFt")) {
-    normalized.altitudeThresholdFt = config.altitudeThresholdFt;
+  const altitude = toFiniteNumber(raw.altitudeThresholdFt);
+  if (altitude !== null && altitude > 0) {
+    normalized.altitudeThresholdFt = altitude;
   }
 
-  if (Object.prototype.hasOwnProperty.call(raw, "speedThresholdKt")) {
-    const value = Number(raw.speedThresholdKt);
-    if (Number.isFinite(value) && value >= 0) {
-      normalized.speedThresholdKt = value;
-    }
-  } else if (Object.prototype.hasOwnProperty.call(config, "speedThresholdKt")) {
-    normalized.speedThresholdKt = config.speedThresholdKt;
+  const speed = toFiniteNumber(raw.speedThresholdKt);
+  if (speed !== null && speed >= 0) {
+    normalized.speedThresholdKt = speed;
   }
 
-  if (Object.prototype.hasOwnProperty.call(raw, "offlineTimeoutSec")) {
-    const value = Number(raw.offlineTimeoutSec);
-    if (Number.isFinite(value) && value >= 5) {
-      normalized.offlineTimeoutSec = Math.round(value);
-    }
-  } else if (Object.prototype.hasOwnProperty.call(config, "offlineTimeoutSec")) {
-    normalized.offlineTimeoutSec = config.offlineTimeoutSec;
+  const timeout = toFiniteNumber(raw.offlineTimeoutSec);
+  if (timeout !== null && timeout >= 5) {
+    normalized.offlineTimeoutSec = Math.round(timeout);
   }
 
   return normalized;
@@ -135,13 +122,13 @@ function getOperationalConfig() {
   return normalizeConfig(config);
 }
 
-function loadConfigFromDisk() {
+async function loadConfigFromDisk() {
   try {
-    const raw = fs.readFileSync(configPath, "utf8");
+    const raw = await fsp.readFile(configPath, "utf8");
 
     if (!raw.trim()) {
       config = { ...DEFAULT_CONFIG };
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
       return;
     }
 
@@ -150,7 +137,7 @@ function loadConfigFromDisk() {
   } catch (err) {
     if (err.code === "ENOENT") {
       try {
-        fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
+        await fsp.writeFile(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
       } catch (writeErr) {
         console.error("❌ config.json konnte nicht erstellt werden:", writeErr.message);
       }
@@ -165,9 +152,9 @@ function loadConfigFromDisk() {
   }
 }
 
-function saveConfig(newConfig) {
+async function saveConfig(newConfig) {
   config = normalizeConfig(newConfig);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
   return getConfig();
 }
 
@@ -179,11 +166,9 @@ function updateConfig(partial) {
 function startConfigWatcher() {
   try {
     fs.watchFile(configPath, { interval: 1000 }, () => {
-      try {
-        loadConfigFromDisk();
-      } catch (err) {
+      loadConfigFromDisk().catch(err => {
         console.error("⚠️ config.json konnte nicht neu geladen werden:", err.message);
-      }
+      });
     });
   } catch (err) {
     console.error("⚠️ Beobachten von config.json fehlgeschlagen:", err.message);
@@ -265,16 +250,19 @@ function parseConfigPayload(payload) {
 }
 
 // ===== State loading =====
-fs.mkdirSync(logsDir, { recursive: true });
+async function initializeState() {
+  await fsp.mkdir(logsDir, { recursive: true });
 
-try {
-  const files = fs.readdirSync(logsDir);
-  files
-    .filter(name => name.toLowerCase().endsWith(".jsonl"))
-    .forEach(file => {
+  try {
+    const files = await fsp.readdir(logsDir);
+    for (const file of files) {
+      if (!file.toLowerCase().endsWith(".jsonl")) {
+        continue;
+      }
+
       const hex = path.basename(file, ".jsonl");
       try {
-        const contents = fs.readFileSync(path.join(logsDir, file), "utf8");
+        const contents = await fsp.readFile(path.join(logsDir, file), "utf8");
         const lines = contents
           .split(/\r?\n/)
           .filter(line => line.trim().length > 0);
@@ -283,26 +271,98 @@ try {
         console.error("⚠️ Log-Datei konnte nicht gelesen werden:", file, err.message);
         logCounts[hex] = logCounts[hex] || 0;
       }
-    });
-} catch (e) {}
-try {
-  const savedEvents = fs.readFileSync("events.json", "utf8");
-  events = JSON.parse(savedEvents);
-} catch (e) {}
-try {
-  const savedTarget = fs.readFileSync("last_target.json", "utf8");
-  const parsed = JSON.parse(savedTarget);
-  if (parsed.hex) targetHex = parsed.hex.toLowerCase();
-} catch (e) {}
-try {
-  const savedLatest = fs.readFileSync("latest.json", "utf8");
-  latestData = JSON.parse(savedLatest);
-} catch (e) {}
+    }
+  } catch (err) {
+    console.error("⚠️ Log-Verzeichnis konnte nicht gelesen werden:", err.message);
+  }
 
-loadPlacesFromDisk();
-startPlacesWatcher();
-loadConfigFromDisk();
-startConfigWatcher();
+  try {
+    const savedEvents = await fsp.readFile("events.json", "utf8");
+    const parsed = JSON.parse(savedEvents);
+    if (Array.isArray(parsed)) {
+      events = parsed;
+    } else {
+      events = [];
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("⚠️ events.json konnte nicht geladen werden:", err.message);
+    }
+    events = [];
+  }
+
+  try {
+    const savedTarget = await fsp.readFile("last_target.json", "utf8");
+    const parsed = JSON.parse(savedTarget);
+    if (parsed.hex) {
+      targetHex = String(parsed.hex).toLowerCase();
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("⚠️ last_target.json konnte nicht geladen werden:", err.message);
+    }
+  }
+
+  try {
+    const savedLatest = await fsp.readFile("latest.json", "utf8");
+    const parsed = JSON.parse(savedLatest);
+    if (parsed && typeof parsed === "object") {
+      latestData = parsed;
+    } else {
+      latestData = {};
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("⚠️ latest.json konnte nicht geladen werden:", err.message);
+    }
+    latestData = {};
+  }
+
+  await loadPlacesFromDisk().catch(err => {
+    console.error("⚠️ places.json konnte nicht geladen werden:", err.message);
+  });
+  startPlacesWatcher();
+
+  await loadConfigFromDisk().catch(err => {
+    console.error("⚠️ config.json konnte nicht geladen werden:", err.message);
+  });
+  startConfigWatcher();
+}
+
+// ===== Page task queue & scraping scheduler =====
+function createSerialTaskQueue() {
+  const queue = [];
+  let running = false;
+
+  const runNext = async () => {
+    if (running) return;
+    const next = queue.shift();
+    if (!next) return;
+
+    running = true;
+    try {
+      const result = await next.fn();
+      next.resolve(result);
+    } catch (err) {
+      next.reject(err);
+    } finally {
+      running = false;
+      runNext();
+    }
+  };
+
+  return function enqueue(fn) {
+    return new Promise((resolve, reject) => {
+      queue.push({ fn, resolve, reject });
+      void runNext();
+    });
+  };
+}
+
+const runWithPage = createSerialTaskQueue();
+const SCRAPE_INTERVAL_MS = 3000;
+let scrapeTimer = null;
+let scrapeLoopActive = false;
 
 // ===== Helpers =====
 function cleanNum(str) {
@@ -319,8 +379,41 @@ function parsePos(raw) {
 
 function parseLastSeen(raw) {
   if (!raw) return null;
-  const sec = parseInt(raw.replace(/[^\d]/g, ""), 10);
-  return isNaN(sec) ? null : sec;
+
+  const text = String(raw).trim().toLowerCase();
+  if (!text) return null;
+
+  const pattern = /([\d.,]+)\s*(ms|s|sec|secs|second|seconds|m|min|minute|minutes|h|hr|hour|hours)?/g;
+  let totalSeconds = 0;
+  let found = false;
+
+  for (const match of text.matchAll(pattern)) {
+    const numberPart = match[1]?.replace(",", ".");
+    const value = Number.parseFloat(numberPart);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+
+    const unit = match[2] || "s";
+    found = true;
+
+    if (unit.startsWith("h")) {
+      totalSeconds += value * 3600;
+    } else if (unit.startsWith("m") && unit !== "ms") {
+      totalSeconds += value * 60;
+    } else if (unit === "ms") {
+      totalSeconds += value / 1000;
+    } else {
+      totalSeconds += value;
+    }
+  }
+
+  if (!found) {
+    return null;
+  }
+
+  const rounded = Math.round(totalSeconds);
+  return rounded >= 0 ? rounded : null;
 }
 
 function toFiniteNumber(value) {
@@ -429,7 +522,6 @@ function ensureFlightState(hex) {
     flightStatus[hex] = {
       status: "offline",
       lastStatusChange: null,
-      lastAboveThreshold: null,
       lastBelowThreshold: null,
       pendingTakeoff: null,
       hasSeen: false
@@ -438,7 +530,7 @@ function ensureFlightState(hex) {
   return flightStatus[hex];
 }
 
-function registerEvent(type, record, options = {}) {
+async function registerEvent(type, record, options = {}) {
   const event = {
     time: record.time,
     type,
@@ -458,12 +550,16 @@ function registerEvent(type, record, options = {}) {
       : placeInfo;
   }
   events.push(event);
-  fs.writeFileSync("events.json", JSON.stringify(events, null, 2));
+  try {
+    await fsp.writeFile("events.json", JSON.stringify(events, null, 2));
+  } catch (err) {
+    console.error("⚠️ events.json konnte nicht gespeichert werden:", err.message);
+  }
   console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
 }
 
 // ===== Event Detection =====
-function detectEventByLastSeen(record) {
+async function detectEventByLastSeen(record) {
   const hex = record.hex;
   if (!hex) return;
 
@@ -508,9 +604,7 @@ function detectEventByLastSeen(record) {
     }
   }
 
-  if (exceedsAltitude || exceedsSpeed) {
-    state.lastAboveThreshold = timestamp;
-  } else if (belowAltitude || belowSpeed) {
+  if (belowAltitude || belowSpeed) {
     state.lastBelowThreshold = timestamp;
   }
 
@@ -531,7 +625,7 @@ function detectEventByLastSeen(record) {
           state.lastBelowThreshold !== null &&
           timestamp - state.lastBelowThreshold <= EVENT_WINDOW_MS) {
         const place = categoriseLanding(record);
-        registerEvent("landing", record, { place });
+        await registerEvent("landing", record, { place });
       }
     }
   }
@@ -542,7 +636,7 @@ function detectEventByLastSeen(record) {
     if (timestamp - changeTime <= EVENT_WINDOW_MS) {
       if (exceedsAltitude || exceedsSpeed) {
         if (!skipInitialAirborne) {
-          registerEvent("takeoff", record);
+          await registerEvent("takeoff", record);
         }
         state.pendingTakeoff = null;
       }
@@ -556,67 +650,111 @@ function detectEventByLastSeen(record) {
 }
 
 // ===== Scraper =====
-async function scrape() {
-  try {
-    if (!page) return;
+async function scrapeOnce() {
+  if (!page) return;
 
-    const data = await page.evaluate(() => {
-      const get = (sel) => document.querySelector(sel)?.textContent.trim() || null;
-      const hexRaw = get("#selected_icao") || "";
-      const hex = hexRaw.replace(/Hex:\s*/i, "").split(/\s+/)[0] || null;
+  const data = await page.evaluate(() => {
+    const get = (sel) => document.querySelector(sel)?.textContent.trim() || null;
+    const hexRaw = get("#selected_icao") || "";
+    const hex = hexRaw.replace(/Hex:\s*/i, "").split(/\s+/)[0] || null;
 
-      const lastSeen = get("#selected_seen_pos") || get("#selected_seen");
+    const lastSeen = get("#selected_seen_pos") || get("#selected_seen");
 
-      return {
-        time: new Date().toISOString(),
-        callsign: get("#selected_callsign"),
-        hex,
-        reg: get("#selected_registration"),
-        type: get("#selected_icaotype"),
-        gs: get("#selected_speed1"),
-        alt: get("#selected_altitude1"),
-        pos: get("#selected_position"),
-        vr: get("#selected_vert_rate"),
-        hdg: get("#selected_track1"),
-        lastSeen // ggf. anderer Selektor
-      };
-    });
-
-    if (!data.hex) return;
-
-    const { lat, lon } = parsePos(data.pos);
-    const record = {
-      time: data.time,
-      hex: data.hex.toLowerCase(),
-      callsign: data.callsign,
-      reg: data.reg,
-      type: data.type,
-      gs: cleanNum(data.gs),
-      alt: cleanNum(data.alt),
-      vr: cleanNum(data.vr),
-      hdg: cleanNum(data.hdg),
-      lat,
-      lon,
-      lastSeen: parseLastSeen(data.lastSeen)
+    return {
+      time: new Date().toISOString(),
+      callsign: get("#selected_callsign"),
+      hex,
+      reg: get("#selected_registration"),
+      type: get("#selected_icaotype"),
+      gs: get("#selected_speed1"),
+      alt: get("#selected_altitude1"),
+      pos: get("#selected_position"),
+      vr: get("#selected_vert_rate"),
+      hdg: get("#selected_track1"),
+      lastSeen // ggf. anderer Selektor
     };
+  });
 
-    if (record.lastSeen === null) {
-      console.warn("⚠️ lastSeen konnte nicht ermittelt werden für", record.hex);
-    }
+  if (!data.hex) return;
 
-    latestData = record;
-    fs.writeFileSync("latest.json", JSON.stringify(latestData, null, 2));
+  const { lat, lon } = parsePos(data.pos);
+  const record = {
+    time: data.time,
+    hex: data.hex.toLowerCase(),
+    callsign: data.callsign,
+    reg: data.reg,
+    type: data.type,
+    gs: cleanNum(data.gs),
+    alt: cleanNum(data.alt),
+    vr: cleanNum(data.vr),
+    hdg: cleanNum(data.hdg),
+    lat,
+    lon,
+    lastSeen: parseLastSeen(data.lastSeen)
+  };
 
-    // Event-Erkennung
-    const status = detectEventByLastSeen(record);
+  if (record.lastSeen === null) {
+    console.warn("⚠️ lastSeen konnte nicht ermittelt werden für", record.hex);
+  }
 
-    // Logging nur wenn online
-    if (status === "online") {
-      await appendLogRecord(record);
-    }
+  latestData = record;
+  try {
+    await fsp.writeFile("latest.json", JSON.stringify(latestData, null, 2));
+  } catch (err) {
+    console.error("⚠️ latest.json konnte nicht gespeichert werden:", err.message);
+  }
 
+  const status = await detectEventByLastSeen(record);
+
+  if (status === "online") {
+    await appendLogRecord(record);
+  }
+}
+
+async function runScrapeCycle() {
+  if (!scrapeLoopActive) {
+    return;
+  }
+
+  try {
+    await runWithPage(() => scrapeOnce());
   } catch (err) {
     console.error("❌ Scrape-Fehler:", err.message);
+  } finally {
+    if (scrapeLoopActive) {
+      scheduleNextScrape();
+    }
+  }
+}
+
+function scheduleNextScrape(delay = SCRAPE_INTERVAL_MS) {
+  if (!scrapeLoopActive) {
+    return;
+  }
+
+  if (scrapeTimer) {
+    clearTimeout(scrapeTimer);
+  }
+
+  scrapeTimer = setTimeout(() => {
+    scrapeTimer = null;
+    void runScrapeCycle();
+  }, delay);
+}
+
+function startScrapeLoop() {
+  if (scrapeLoopActive) {
+    return;
+  }
+  scrapeLoopActive = true;
+  scheduleNextScrape(0);
+}
+
+function stopScrapeLoop() {
+  scrapeLoopActive = false;
+  if (scrapeTimer) {
+    clearTimeout(scrapeTimer);
+    scrapeTimer = null;
   }
 }
 
@@ -750,19 +888,56 @@ function readLogFile(filePath, { page = 1, limit = null } = {}) {
 }
 
 // ===== Browser Start =====
+async function resolveChromiumExecutable() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  try {
+    const { stdout } = await promisify(exec)("which chromium");
+    const candidate = stdout.trim();
+    if (candidate) {
+      return candidate;
+    }
+  } catch (err) {
+    // ignore, we'll fall back to Puppeteer's bundled binary
+  }
+
+  try {
+    if (typeof puppeteer.executablePath === "function") {
+      const builtin = puppeteer.executablePath();
+      if (builtin) {
+        return builtin;
+      }
+    }
+  } catch (err) {
+    console.warn("⚠️ Puppeteer executablePath konnte nicht bestimmt werden:", err.message);
+  }
+
+  return undefined;
+}
+
 async function startBrowser() {
-  const { stdout: chromiumPath } = await promisify(exec)("which chromium");
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    executablePath: chromiumPath.trim()
-  });
+  try {
+    const executablePath = await resolveChromiumExecutable();
+    const launchOptions = {
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    };
 
-  page = await browser.newPage();
-  await page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" });
-  console.log("🌍 Globe geladen für:", targetHex);
+    if (executablePath) {
+      launchOptions.executablePath = executablePath;
+    }
 
-  setInterval(scrape, 3000);
+    browser = await puppeteer.launch(launchOptions);
+    page = await browser.newPage();
+    await runWithPage(() => page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" }));
+    console.log("🌍 Globe geladen für:", targetHex);
+
+    startScrapeLoop();
+  } catch (err) {
+    console.error("❌ Browserstart fehlgeschlagen:", err.message);
+  }
 }
 
 // ===== Static Serve Helper =====
@@ -795,84 +970,132 @@ function sendError(res, statusCode, message) {
   sendJSON(res, statusCode, { error: message });
 }
 
-function readJsonBody(req, res, onSuccess) {
-  let body = "";
-  let aborted = false;
+async function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let aborted = false;
 
-  req.on("data", chunk => {
-    if (aborted) return;
-    body += chunk;
-    if (body.length > 1e6) {
+    const abort = (err) => {
+      if (aborted) return;
       aborted = true;
-      sendError(res, 413, "Payload zu groß.");
-      req.destroy();
-    }
-  });
+      reject(err);
+    };
 
-  req.on("end", () => {
-    if (aborted) return;
-    try {
-      const payload = body.trim() ? JSON.parse(body) : {};
-      onSuccess(payload);
-    } catch (err) {
-      sendError(res, 400, "Ungültiger JSON-Body.");
-    }
-  });
+    req.on("aborted", () => {
+      const err = new Error("Request abgebrochen.");
+      err.statusCode = 400;
+      abort(err);
+    });
 
-  req.on("error", err => {
-    if (aborted) return;
-    console.error("❌ Fehler beim Empfangen des Request-Bodys:", err.message);
-    sendError(res, 500, "Body konnte nicht gelesen werden.");
+    req.on("data", chunk => {
+      if (aborted) return;
+      body += chunk;
+      if (body.length > 1e6) {
+        const err = new Error("Payload zu groß.");
+        err.statusCode = 413;
+        abort(err);
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      if (aborted) return;
+      try {
+        const payload = body.trim() ? JSON.parse(body) : {};
+        resolve(payload);
+      } catch (err) {
+        const parseError = new Error("Ungültiger JSON-Body.");
+        parseError.statusCode = 400;
+        reject(parseError);
+      }
+    });
+
+    req.on("error", err => {
+      if (aborted) return;
+      reject(err);
+    });
   });
 }
 
-// ===== Server =====
-const server = http.createServer((req, res) => {
+async function handleSetRequest(res, hexParam) {
+  const raw = typeof hexParam === "string" ? hexParam.trim() : "";
+  if (!raw) {
+    sendError(res, 400, "Bitte ?hex=xxxxxx angeben.");
+    return;
+  }
+
+  targetHex = raw.toLowerCase();
+
+  try {
+    await fsp.writeFile("last_target.json", JSON.stringify({ hex: targetHex }, null, 2));
+  } catch (err) {
+    console.error("⚠️ last_target.json konnte nicht gespeichert werden:", err.message);
+  }
+
+  if (!page) {
+    console.log("🎯 Neues Ziel gespeichert, Browser noch nicht bereit:", targetHex);
+    sendJSON(res, 202, { message: "Ziel gespeichert. Browser wird vorbereitet.", hex: targetHex });
+    return;
+  }
+
+  try {
+    await runWithPage(() => page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" }));
+    if (scrapeLoopActive) {
+      scheduleNextScrape(0);
+    } else {
+      startScrapeLoop();
+    }
+    console.log("🎯 Navigiere zu neuem Ziel:", targetHex);
+    sendJSON(res, 200, { success: true, hex: targetHex });
+  } catch (err) {
+    console.error("❌ Navigation zum neuen Ziel fehlgeschlagen:", err.message);
+    sendError(res, 500, "Navigation fehlgeschlagen.");
+  }
+}
+
+async function handleRequest(req, res) {
   const q = url.parse(req.url, true);
 
   if (q.pathname === "/latest") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(latestData));
+    sendJSON(res, 200, latestData);
+    return;
+  }
 
-  } else if (q.pathname === "/log") {
+  if (q.pathname === "/log") {
+    await handleLogRequest(q, res);
+    return;
+  }
 
-    return handleLogRequest(q, res);
+  if (q.pathname === "/events") {
+    sendJSON(res, 200, events);
+    return;
+  }
 
-  } else if (q.pathname === "/events") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(events));
-
-  } else if (q.pathname === "/config") {
+  if (q.pathname === "/config") {
     if (req.method === "GET") {
       sendJSON(res, 200, getOperationalConfig());
       return;
     }
 
     if (req.method === "POST") {
-      readJsonBody(req, res, payload => {
-        let configPayload;
-        try {
-          configPayload = parseConfigPayload(payload);
-        } catch (err) {
-          sendError(res, 400, err.message);
-          return;
-        }
-
-        try {
-          const updated = updateConfig(configPayload);
-          sendJSON(res, 200, updated);
-        } catch (err) {
-          console.error("❌ Speichern von config.json fehlgeschlagen:", err.message);
-          sendError(res, 500, "Konfiguration konnte nicht gespeichert werden.");
-        }
-      });
+      const payload = await parseJsonBody(req);
+      let configPayload;
+      try {
+        configPayload = parseConfigPayload(payload);
+      } catch (err) {
+        sendError(res, 400, err.message);
+        return;
+      }
+      const updated = await updateConfig(configPayload);
+      sendJSON(res, 200, updated);
       return;
     }
 
     sendError(res, 405, "Methode nicht erlaubt.");
     return;
+  }
 
-  } else if (q.pathname.startsWith("/places")) {
+  if (q.pathname && q.pathname.startsWith("/places")) {
     const segments = q.pathname.split("/").filter(Boolean);
 
     if (segments.length === 1) {
@@ -882,27 +1105,18 @@ const server = http.createServer((req, res) => {
       }
 
       if (req.method === "POST") {
-        readJsonBody(req, res, payload => {
-          let placeData;
-          try {
-            placeData = parsePlacePayload(payload);
-          } catch (err) {
-            sendError(res, 400, err.message);
-            return;
-          }
-
-          const newPlace = { id: generatePlaceId(), ...placeData };
-          const current = getPlaces();
-          const updatedList = [...current, newPlace];
-
-          try {
-            savePlaces(updatedList);
-            sendJSON(res, 201, newPlace);
-          } catch (err) {
-            console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
-            sendError(res, 500, "Ort konnte nicht gespeichert werden.");
-          }
-        });
+        const payload = await parseJsonBody(req);
+        let placeData;
+        try {
+          placeData = parsePlacePayload(payload);
+        } catch (err) {
+          sendError(res, 400, err.message);
+          return;
+        }
+        const newPlace = { id: generatePlaceId(), ...placeData };
+        const updatedList = [...getPlaces(), newPlace];
+        await savePlaces(updatedList);
+        sendJSON(res, 201, newPlace);
         return;
       }
 
@@ -930,35 +1144,27 @@ const server = http.createServer((req, res) => {
       }
 
       if (req.method === "PUT") {
-        readJsonBody(req, res, payload => {
-          let placeData;
-          try {
-            placeData = parsePlacePayload(payload);
-          } catch (err) {
-            sendError(res, 400, err.message);
-            return;
-          }
+        const payload = await parseJsonBody(req);
+        let placeData;
+        try {
+          placeData = parsePlacePayload(payload);
+        } catch (err) {
+          sendError(res, 400, err.message);
+          return;
+        }
+        const current = getPlaces();
+        const index = current.findIndex(place => place && String(place.id) === String(placeId));
 
-          const current = getPlaces();
-          const index = current.findIndex(place => place && String(place.id) === String(placeId));
+        if (index < 0) {
+          sendError(res, 404, "Ort nicht gefunden.");
+          return;
+        }
 
-          if (index < 0) {
-            sendError(res, 404, "Ort nicht gefunden.");
-            return;
-          }
-
-          const updatedPlace = { ...current[index], ...placeData, id: current[index].id ?? placeId };
-          const updatedList = [...current];
-          updatedList[index] = updatedPlace;
-
-          try {
-            savePlaces(updatedList);
-            sendJSON(res, 200, updatedPlace);
-          } catch (err) {
-            console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
-            sendError(res, 500, "Ort konnte nicht gespeichert werden.");
-          }
-        });
+        const updatedPlace = { ...current[index], ...placeData, id: current[index].id ?? placeId };
+        const updatedList = [...current];
+        updatedList[index] = updatedPlace;
+        await savePlaces(updatedList);
+        sendJSON(res, 200, updatedPlace);
         return;
       }
 
@@ -971,13 +1177,8 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        try {
-          savePlaces(filtered);
-          sendJSON(res, 200, { success: true });
-        } catch (err) {
-          console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
-          sendError(res, 500, "Ort konnte nicht gelöscht werden.");
-        }
+        await savePlaces(filtered);
+        sendJSON(res, 200, { success: true });
         return;
       }
 
@@ -987,24 +1188,45 @@ const server = http.createServer((req, res) => {
 
     sendError(res, 404, "Pfad nicht gefunden.");
     return;
-
-  } else if (q.pathname === "/set") {
-    if (q.query.hex) {
-      targetHex = q.query.hex.toLowerCase();
-      fs.writeFileSync("last_target.json", JSON.stringify({ hex: targetHex }));
-      page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" });
-      res.end("✅ Neues Ziel gesetzt: " + targetHex);
-    } else {
-      res.end("❌ Bitte ?hex=xxxxxx angeben");
-    }
-
-  } else {
-    let filePath = path.join(__dirname, "public", q.pathname === "/" ? "index.html" : q.pathname);
-    serveStatic(res, filePath);
   }
+
+  if (q.pathname === "/set") {
+    await handleSetRequest(res, q.query.hex);
+    return;
+  }
+
+  const filePath = path.join(__dirname, "public", q.pathname === "/" ? "index.html" : q.pathname);
+  serveStatic(res, filePath);
+  return;
+}
+
+const server = http.createServer((req, res) => {
+  Promise.resolve(handleRequest(req, res)).catch(err => {
+    console.error("❌ Unerwarteter Fehler:", err.message);
+    if (!res.writableEnded) {
+      const status = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+      const message = status === 500 ? "Interner Serverfehler." : err.message;
+      sendError(res, status, message);
+    }
+  });
 });
 
-server.listen(3000, () => {
-  console.log("✅ Server läuft auf Port 3000");
-  startBrowser();
+async function bootstrap() {
+  try {
+    await initializeState();
+  } catch (err) {
+    console.error("❌ Initialisierung fehlgeschlagen:", err.message);
+  }
+
+  server.listen(3000, () => {
+    console.log("✅ Server läuft auf Port 3000");
+    startBrowser().catch(err => {
+      console.error("❌ Starten des Browsers fehlgeschlagen:", err.message);
+    });
+  });
+}
+
+bootstrap().catch(err => {
+  console.error("❌ Kritischer Fehler beim Start:", err.message);
+  process.exitCode = 1;
 });

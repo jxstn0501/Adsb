@@ -338,6 +338,16 @@
       }
     }
 
+    function setHexStatus(message, type = "") {
+      const el = document.getElementById("hexStatus");
+      if (!el) return;
+      el.textContent = message || "";
+      el.classList.remove("success", "error");
+      if (type) {
+        el.classList.add(type);
+      }
+    }
+
     function renderMap(hex = currentHex) {
       if (!hex) {
         document.getElementById("content").innerHTML = '<div class="logs">Bitte eine ICAO Hex eingeben.</div>';
@@ -374,17 +384,32 @@
 
     async function showEvents() {
       stopSettingsInterval();
-      const r = await fetch("/events");
-      const data = await r.json();
       let html = '<div class="logs">';
-      data.forEach(ev => {
-        html += `<div class="log-entry">
-          <b>${ev.type.toUpperCase()}</b> – ${ev.callsign||ev.hex}<br>
-          Alt: ${ev.alt||'—'} ft | Speed: ${ev.gs||'—'} kt<br>
-          ${ev.lat}, ${ev.lon}<br>
-          <small>${ev.time}</small>
+
+      try {
+        const r = await fetch("/events");
+        if (!r.ok) {
+          throw new Error(`Serverantwort ${r.status}`);
+        }
+        const data = await r.json();
+        if (!Array.isArray(data) || data.length === 0) {
+          html += 'keine Events gefunden';
+        } else {
+          data.forEach(ev => {
+            html += `<div class="log-entry">
+          <b>${escapeHtml(ev.type || '').toUpperCase()}</b> – ${escapeHtml(ev.callsign||ev.hex||'—')}<br>
+          Alt: ${escapeHtml(ev.alt||'—')} ft | Speed: ${escapeHtml(ev.gs||'—')} kt<br>
+          ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}<br>
+          <small>${escapeHtml(ev.time||'')}</small>
         </div>`;
-      });
+          });
+        }
+      } catch (err) {
+        console.error("[Events] Fehler beim Laden der Events:", err);
+        const message = err && err.message ? err.message : String(err);
+        html += `Fehler beim Laden der Events (${escapeHtml(message)})`;
+      }
+
       html += '</div>';
       document.getElementById("content").innerHTML = html;
       closeSidebar();
@@ -445,18 +470,58 @@
     async function applyHex() {
       const input = document.getElementById("hexInput");
       const hex = input ? input.value.trim() : "";
-      if (hex) {
-        await fetch(`/set?hex=${encodeURIComponent(hex)}`);
+
+      if (!hex) {
+        setHexStatus("Bitte eine ICAO Hex eingeben.", "error");
+        return;
+      }
+
+      setHexStatus("Sende Anfrage...");
+
+      try {
+        const response = await fetch(`/set?hex=${encodeURIComponent(hex)}`);
+        const contentType = response.headers.get("content-type") || "";
+        let payload = null;
+
+        if (contentType.includes("application/json")) {
+          payload = await response.json();
+        } else {
+          const text = await response.text();
+          payload = text ? { message: text } : {};
+        }
+
+        if (!response.ok) {
+          const message = payload && typeof payload === "object"
+            ? payload.error || payload.message
+            : null;
+          throw new Error(message || `Serverantwort ${response.status}`);
+        }
+
         setCurrentHex(hex);
-        updateLatest();
+        await updateLatest();
+
+        const defaultMessage = `Neues Ziel gesetzt: ${hex}`;
+        const responseMessage = payload && typeof payload === "object"
+          ? payload.message || payload.error || defaultMessage
+          : defaultMessage;
+
+        setHexStatus(responseMessage, "success");
+      } catch (err) {
+        console.error("[Settings] Fehler beim Setzen des Flugzeugs:", err);
+        const message = err && err.message ? err.message : "Flugzeug konnte nicht gesetzt werden.";
+        setHexStatus(message, "error");
       }
     }
 
     async function updateLatest() {
-      const res = await fetch("/latest");
-      const d = await res.json();
-      if (!d.time) return;
-      const row = `<tr>
+      try {
+        const res = await fetch("/latest");
+        if (!res.ok) {
+          throw new Error(`Serverantwort ${res.status}`);
+        }
+        const d = await res.json();
+        if (!d || !d.time) return;
+        const row = `<tr>
         <td>${d.time}</td>
         <td>${d.callsign}</td>
         <td>${d.hex}</td>
@@ -469,8 +534,11 @@
         <td>${d.vr}</td>
         <td>${d.hdg}</td>
       </tr>`;
-      const body = document.getElementById("latestBody");
-      if (body) body.innerHTML = row;
+        const body = document.getElementById("latestBody");
+        if (body) body.innerHTML = row;
+      } catch (err) {
+        console.warn("[Latest] Aktualisierung fehlgeschlagen:", err);
+      }
     }
 
     async function showSettings() {
@@ -513,6 +581,7 @@
           <label for="hexInput">ICAO Hex</label>
           <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" />
           <button class="primary-button" onclick="applyHex()">Flugzeug setzen</button>
+          <p id="hexStatus" class="search-status"></p>
         </div>
         <div class="settings-section">
           <h3>Letzter Datensatz</h3>
@@ -579,6 +648,7 @@
       </div>`;
 
       container.innerHTML = html;
+      setHexStatus("");
 
       clearPlaceSearchResults();
 

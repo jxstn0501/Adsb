@@ -10,8 +10,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/node": "^18.0.6",
-    "node-fetch": "^3.2.6",
     "puppeteer": "^20.9.0"
   }
 }
