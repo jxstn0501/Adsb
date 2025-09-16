@@ -15,6 +15,71 @@ let flightStatus = {};    // Status- & Verlaufdaten pro Flugzeug
 const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
 const logCounts = {};     // Zeilenanzahl pro Hex-Datei
+const placesPath = path.join(__dirname, "places.json");
+let places = [];
+
+// ===== Places storage =====
+function loadPlacesFromDisk() {
+  try {
+    const raw = fs.readFileSync(placesPath, "utf8");
+    if (!raw.trim()) {
+      places = [];
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      places = parsed;
+    } else {
+      console.warn("⚠️ places.json enthält kein Array. Bestehende Werte bleiben erhalten.");
+    }
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      try {
+        fs.writeFileSync(placesPath, JSON.stringify([], null, 2));
+        places = [];
+      } catch (writeErr) {
+        console.error("❌ places.json konnte nicht erstellt werden:", writeErr.message);
+      }
+    } else if (err.name === "SyntaxError") {
+      console.error("❌ Ungültiges JSON in places.json:", err.message);
+    } else {
+      console.error("❌ places.json konnte nicht gelesen werden:", err.message);
+    }
+  }
+}
+
+function getPlaces() {
+  return Array.isArray(places)
+    ? places.map(place => (place && typeof place === "object" ? { ...place } : place))
+    : [];
+}
+
+function savePlaces(list) {
+  if (!Array.isArray(list)) {
+    throw new TypeError("Places list must be an array.");
+  }
+
+  const serialized = JSON.stringify(list, null, 2);
+  const parsed = JSON.parse(serialized);
+  places = parsed;
+  fs.writeFileSync(placesPath, serialized);
+  return getPlaces();
+}
+
+function startPlacesWatcher() {
+  try {
+    fs.watchFile(placesPath, { interval: 1000 }, () => {
+      try {
+        loadPlacesFromDisk();
+      } catch (err) {
+        console.error("⚠️ places.json konnte nicht neu geladen werden:", err.message);
+      }
+    });
+  } catch (err) {
+    console.error("⚠️ Beobachten von places.json fehlgeschlagen:", err.message);
+  }
+}
 
 // ===== State loading =====
 fs.mkdirSync(logsDir, { recursive: true });
@@ -50,6 +115,9 @@ try {
   const savedLatest = fs.readFileSync("latest.json", "utf8");
   latestData = JSON.parse(savedLatest);
 } catch (e) {}
+
+loadPlacesFromDisk();
+startPlacesWatcher();
 
 // ===== Helpers =====
 function cleanNum(str) {
@@ -432,6 +500,104 @@ const server = http.createServer((req, res) => {
   } else if (q.pathname === "/events") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(events));
+
+  } else if (q.pathname === "/places") {
+    if (req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(getPlaces()));
+      return;
+    }
+
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", chunk => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        let payload;
+        try {
+          payload = body.trim() ? JSON.parse(body) : null;
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Ungültiger JSON-Body." }));
+          return;
+        }
+
+        if (!payload || typeof payload !== "object") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Body muss ein Objekt sein." }));
+          return;
+        }
+
+        const idValue = payload.id;
+        if (typeof idValue === "undefined" || idValue === null || idValue === "") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Feld 'id' wird benötigt." }));
+          return;
+        }
+
+        const list = getPlaces();
+        const idString = String(idValue);
+        const index = list.findIndex(place => place && String(place.id) === idString);
+
+        if (index >= 0) {
+          list[index] = { ...list[index], ...payload };
+        } else {
+          list.push(payload);
+        }
+
+        try {
+          const updated = savePlaces(list);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(updated));
+        } catch (err) {
+          console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Speichern fehlgeschlagen." }));
+        }
+      });
+      req.on("error", err => {
+        console.error("❌ Fehler beim Empfangen des Request-Bodys:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Body konnte nicht gelesen werden." }));
+      });
+      return;
+    }
+
+    if (req.method === "DELETE") {
+      const rawId = Array.isArray(q.query.id) ? q.query.id[0] : q.query.id;
+      const idString = typeof rawId === "string" ? rawId.trim() : rawId;
+
+      if (!idString) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Parameter 'id' wird benötigt." }));
+        return;
+      }
+
+      const list = getPlaces();
+      const filtered = list.filter(place => !(place && String(place.id) === String(idString)));
+
+      if (filtered.length === list.length) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Ort nicht gefunden." }));
+        return;
+      }
+
+      try {
+        const updated = savePlaces(filtered);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(updated));
+      } catch (err) {
+        console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Löschen fehlgeschlagen." }));
+      }
+      return;
+    }
+
+    res.writeHead(405, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Methode nicht erlaubt." }));
+    return;
 
   } else if (q.pathname === "/set") {
     if (q.query.hex) {
