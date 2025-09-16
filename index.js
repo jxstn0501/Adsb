@@ -138,6 +138,105 @@ function parseLastSeen(raw) {
   return isNaN(sec) ? null : sec;
 }
 
+function toFiniteNumber(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const coords = [lat1, lon1, lat2, lon2].map(toFiniteNumber);
+  if (coords.some(value => value === null)) {
+    return Infinity;
+  }
+
+  const [latA, lonA, latB, lonB] = coords;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+
+  const φ1 = toRad(latA);
+  const φ2 = toRad(latB);
+  const Δφ = toRad(latB - latA);
+  const Δλ = toRad(lonB - lonA);
+
+  const sinHalfΔφ = Math.sin(Δφ / 2);
+  const sinHalfΔλ = Math.sin(Δλ / 2);
+
+  const a = sinHalfΔφ * sinHalfΔφ +
+            Math.cos(φ1) * Math.cos(φ2) * sinHalfΔλ * sinHalfΔλ;
+  const normalizedA = Math.min(1, Math.max(0, a));
+  const c = 2 * Math.atan2(Math.sqrt(normalizedA), Math.sqrt(1 - normalizedA));
+  const EARTH_RADIUS = 6371000; // meters
+
+  return EARTH_RADIUS * c;
+}
+
+const LANDING_MATCH_RADIUS_METERS = 500;
+
+function categoriseLanding(record) {
+  if (!record || typeof record !== "object") {
+    return { type: "external" };
+  }
+
+  const lat = toFiniteNumber(record.lat);
+  const lon = toFiniteNumber(record.lon);
+
+  if (lat === null || lon === null) {
+    return { type: "external" };
+  }
+
+  const list = getPlaces();
+  if (!Array.isArray(list) || list.length === 0) {
+    return { type: "external" };
+  }
+
+  let nearest = null;
+  let nearestDistance = Infinity;
+
+  for (const place of list) {
+    if (!place || typeof place !== "object") {
+      continue;
+    }
+
+    const placeLat = toFiniteNumber(place.lat);
+    const placeLon = toFiniteNumber(place.lon);
+
+    if (placeLat === null || placeLon === null) {
+      continue;
+    }
+
+    const distance = haversine(lat, lon, placeLat, placeLon);
+    if (!Number.isFinite(distance)) {
+      continue;
+    }
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = { place, lat: placeLat, lon: placeLon };
+    }
+  }
+
+  if (nearest && nearestDistance <= LANDING_MATCH_RADIUS_METERS) {
+    const { place, lat: placeLat, lon: placeLon } = nearest;
+    const name =
+      typeof place.name === "string" && place.name.trim()
+        ? place.name.trim()
+        : (typeof place.id !== "undefined" ? String(place.id) : "Unbenannter Ort");
+    const type =
+      typeof place.type === "string" && place.type.trim()
+        ? place.type
+        : "unknown";
+
+    return { name, lat: placeLat, lon: placeLon, type };
+  }
+
+  return { type: "external" };
+}
+
 const ALTITUDE_THRESHOLD_FT = 300;
 const EVENT_WINDOW_MS = 60 * 1000;
 
@@ -155,7 +254,7 @@ function ensureFlightState(hex) {
   return flightStatus[hex];
 }
 
-function registerEvent(type, record) {
+function registerEvent(type, record, options = {}) {
   const event = {
     time: record.time,
     type,
@@ -167,6 +266,13 @@ function registerEvent(type, record) {
     gs: record.gs,
     lastSeen: record.lastSeen
   };
+
+  if (options && Object.prototype.hasOwnProperty.call(options, "place")) {
+    const placeInfo = options.place;
+    event.place = placeInfo && typeof placeInfo === "object"
+      ? { ...placeInfo }
+      : placeInfo;
+  }
   events.push(event);
   fs.writeFileSync("events.json", JSON.stringify(events, null, 2));
   console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
@@ -230,7 +336,8 @@ function detectEventByLastSeen(record) {
       if (prevStatus === "online" &&
           state.lastBelowThreshold !== null &&
           timestamp - state.lastBelowThreshold <= EVENT_WINDOW_MS) {
-        registerEvent("landing", record);
+        const place = categoriseLanding(record);
+        registerEvent("landing", record, { place });
       }
     }
   }
