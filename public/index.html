@@ -89,22 +89,97 @@
 
     .settings {
       padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
-    .settings input,
-    .settings button {
-      width: 100%; padding: 12px; margin: 6px 0;
-      border: none; border-radius: 8px; font-size: 16px;
+    .settings-section {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.08);
     }
-    .settings button {
-      background: #ff3b30; color: #fff; cursor: pointer;
+    .settings-section h3,
+    .settings-section h4 {
+      margin: 0 0 10px;
     }
-    .settings button:hover { opacity: 0.9; }
+    .settings label {
+      display: block;
+      font-size: 13px;
+      color: #555;
+      margin-top: 12px;
+    }
+    .settings input {
+      width: 100%;
+      padding: 10px 12px;
+      margin-top: 6px;
+      border-radius: 8px;
+      border: 1px solid #d1d1d6;
+      font-size: 15px;
+      box-sizing: border-box;
+      background: #fff;
+    }
+    .settings input:focus {
+      outline: none;
+      border-color: #ff3b30;
+      box-shadow: 0 0 0 3px rgba(255,59,48,0.15);
+    }
+    .settings .primary-button {
+      width: 100%;
+      padding: 12px;
+      margin-top: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      background: #ff3b30;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+    .settings .primary-button:hover { opacity: 0.9; }
+    .settings .button-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .settings .button-row .primary-button {
+      margin-top: 0;
+    }
+    .settings .button-secondary {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      background: #d1d1d6;
+      color: #1c1c1e;
+      cursor: pointer;
+    }
+    .settings .button-secondary:hover { background: #c7c7cc; }
     .settings table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     .settings th, .settings td {
       text-align: left; padding: 8px; border-bottom: 1px solid #ddd;
       font-size: 14px;
     }
     .settings th { background: #f2f2f7; }
+    .settings .place-actions { display: flex; gap: 6px; }
+    .settings .action-btn {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      background: #2c2c2e;
+      color: #fff;
+      transition: background 0.2s ease;
+    }
+    .settings .action-btn:hover { background: #3a3a3c; }
+    .settings .action-btn.danger { background: #ff453a; }
+    .settings .action-btn.danger:hover { background: #ff5e57; }
+    .settings .empty-state { font-size: 14px; color: #666; margin-top: 12px; }
+    .settings-message { font-size: 14px; margin-top: 8px; min-height: 18px; }
+    .settings-message.success { color: #34c759; }
+    .settings-message.error { color: #ff3b30; }
   </style>
 </head>
 <body>
@@ -130,6 +205,9 @@
   <script>
     let currentHex = "";
     let settingsInterval = null;
+    let currentConfigCache = null;
+    let currentPlaces = [];
+    let editingPlaceId = null;
 
     window.addEventListener("DOMContentLoaded", initializeTracker);
 
@@ -320,25 +398,454 @@
       if (body) body.innerHTML = row;
     }
 
-    function showSettings() {
+    async function showSettings() {
       stopSettingsInterval();
-      const html = `<div class="settings">
-        <input id="hexInput" type="text" placeholder="ICAO Hex" value="${currentHex}" />
-        <button onclick="applyHex()">Flugzeug setzen</button>
-        <table>
-          <thead>
-            <tr>
-              <th>Zeit</th><th>Callsign</th><th>Hex</th><th>Reg</th><th>Type</th>
-              <th>GS</th><th>Alt</th><th>Lat</th><th>Lon</th><th>VR</th><th>Hdg</th>
-            </tr>
-          </thead>
-          <tbody id="latestBody"></tbody>
-        </table>
-      </div>`;
-      document.getElementById("content").innerHTML = html;
-      updateLatest();
-      settingsInterval = setInterval(updateLatest, 3000);
       closeSidebar();
+
+      const container = document.getElementById("content");
+      if (container) {
+        container.innerHTML = '<div class="settings"><div class="settings-section"><p>Lade Einstellungen...</p></div></div>';
+      }
+
+      try {
+        const [configData, placesData] = await Promise.all([
+          fetchConfig(),
+          fetchPlaces()
+        ]);
+        currentConfigCache = configData;
+        currentPlaces = Array.isArray(placesData) ? placesData : [];
+        editingPlaceId = null;
+        renderSettingsView(currentConfigCache, currentPlaces);
+        updateLatest();
+        settingsInterval = setInterval(updateLatest, 3000);
+      } catch (err) {
+        console.error("[Settings] Fehler beim Laden:", err);
+        if (container) {
+          const message = err && err.message ? err.message : String(err);
+          container.innerHTML = `<div class="settings"><div class="settings-section"><p>Fehler beim Laden der Einstellungen: ${escapeHtml(message)}</p></div></div>`;
+        }
+      }
+    }
+
+    function renderSettingsView(config, places) {
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      const safeConfig = config || {};
+      const html = `<div class="settings">
+        <div class="settings-section">
+          <h3>Flugzeug</h3>
+          <label for="hexInput">ICAO Hex</label>
+          <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" />
+          <button class="primary-button" onclick="applyHex()">Flugzeug setzen</button>
+        </div>
+        <div class="settings-section">
+          <h3>Letzter Datensatz</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Zeit</th><th>Callsign</th><th>Hex</th><th>Reg</th><th>Type</th>
+                <th>GS</th><th>Alt</th><th>Lat</th><th>Lon</th><th>VR</th><th>Hdg</th>
+              </tr>
+            </thead>
+            <tbody id="latestBody"></tbody>
+          </table>
+        </div>
+        <div class="settings-section">
+          <h3>Schwellwerte</h3>
+          <form id="configForm" onsubmit="submitConfig(event)">
+            <label for="cfgAltitude">Höhen-Schwelle (ft)</label>
+            <input id="cfgAltitude" type="number" min="1" step="1" required />
+            <label for="cfgSpeed">Geschwindigkeits-Schwelle (kt)</label>
+            <input id="cfgSpeed" type="number" min="0" step="1" required />
+            <label for="cfgTimeout">Timeout (s)</label>
+            <input id="cfgTimeout" type="number" min="5" step="1" required />
+            <button type="submit" class="primary-button">Konfiguration speichern</button>
+          </form>
+          <div id="configMessage" class="settings-message"></div>
+        </div>
+        <div class="settings-section">
+          <h3>Orte</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th><th>Typ</th><th>Lat</th><th>Lon</th><th>Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="placesTableBody"></tbody>
+          </table>
+          <div id="placesEmpty" class="empty-state">Keine Orte hinterlegt.</div>
+        </div>
+        <div class="settings-section">
+          <h4 id="placeFormTitle">Neuen Ort hinzufügen</h4>
+          <form id="placeForm" onsubmit="submitPlace(event)">
+            <label for="placeName">Name</label>
+            <input id="placeName" type="text" required />
+            <label for="placeType">Typ</label>
+            <input id="placeType" type="text" required />
+            <label for="placeLat">Breite (Lat)</label>
+            <input id="placeLat" type="number" step="0.0001" min="-90" max="90" required />
+            <label for="placeLon">Länge (Lon)</label>
+            <input id="placeLon" type="number" step="0.0001" min="-180" max="180" required />
+            <div class="button-row">
+              <button type="submit" id="placeSubmit" class="primary-button">Hinzufügen</button>
+              <button type="button" id="placeCancel" class="button-secondary" onclick="cancelPlaceEdit()">Abbrechen</button>
+            </div>
+          </form>
+          <div id="placeFormMessage" class="settings-message"></div>
+        </div>
+      </div>`;
+
+      container.innerHTML = html;
+
+      const altitudeInput = document.getElementById("cfgAltitude");
+      if (altitudeInput) {
+        altitudeInput.value = safeConfig.altitudeThresholdFt ?? "";
+      }
+      const speedInput = document.getElementById("cfgSpeed");
+      if (speedInput) {
+        speedInput.value = safeConfig.speedThresholdKt ?? "";
+      }
+      const timeoutInput = document.getElementById("cfgTimeout");
+      if (timeoutInput) {
+        timeoutInput.value = safeConfig.offlineTimeoutSec ?? "";
+      }
+
+      const hexInput = document.getElementById("hexInput");
+      if (hexInput) {
+        hexInput.value = currentHex;
+      }
+
+      showConfigMessage("", "");
+      showPlaceMessage("", "");
+      updatePlaceFormState();
+      renderPlacesTable(places);
+    }
+
+    async function fetchConfig() {
+      const res = await fetch("/config");
+      if (!res.ok) {
+        throw new Error(`Serverantwort ${res.status}`);
+      }
+      const data = await res.json();
+      const altitude = Number(data.altitudeThresholdFt);
+      const speed = Number(data.speedThresholdKt);
+      const timeout = Number(data.offlineTimeoutSec);
+      return {
+        altitudeThresholdFt: Number.isFinite(altitude) ? altitude : 0,
+        speedThresholdKt: Number.isFinite(speed) ? speed : 0,
+        offlineTimeoutSec: Number.isFinite(timeout) ? timeout : 0
+      };
+    }
+
+    async function fetchPlaces() {
+      const res = await fetch("/places");
+      if (!res.ok) {
+        throw new Error(`Serverantwort ${res.status}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    }
+
+    function renderPlacesTable(list) {
+      const body = document.getElementById("placesTableBody");
+      const empty = document.getElementById("placesEmpty");
+      if (!body || !empty) return;
+
+      if (!Array.isArray(list) || list.length === 0) {
+        body.innerHTML = "";
+        empty.style.display = "block";
+        return;
+      }
+
+      const rows = list.map(place => {
+        if (!place) return "";
+        const idString = place.id !== undefined && place.id !== null ? String(place.id) : "";
+        const editId = JSON.stringify(idString);
+        const name = place.name !== undefined && place.name !== null ? place.name : "—";
+        const type = place.type !== undefined && place.type !== null ? place.type : "—";
+        const lat = formatCoordinate(place.lat);
+        const lon = formatCoordinate(place.lon);
+        const actions = idString
+          ? `<button type="button" class="action-btn" onclick='startEditPlace(${editId})'>Bearbeiten</button>
+             <button type="button" class="action-btn danger" onclick='deletePlace(${editId})'>Löschen</button>`
+          : "";
+        return `<tr>
+          <td>${escapeHtml(name)}</td>
+          <td>${escapeHtml(type)}</td>
+          <td>${lat}</td>
+          <td>${lon}</td>
+          <td class="place-actions">${actions}</td>
+        </tr>`;
+      }).join("");
+
+      body.innerHTML = rows;
+      empty.style.display = "none";
+    }
+
+    function updatePlaceFormState() {
+      const title = document.getElementById("placeFormTitle");
+      const submit = document.getElementById("placeSubmit");
+      const cancel = document.getElementById("placeCancel");
+      if (title) {
+        title.textContent = editingPlaceId ? "Ort bearbeiten" : "Neuen Ort hinzufügen";
+      }
+      if (submit) {
+        submit.textContent = editingPlaceId ? "Speichern" : "Hinzufügen";
+      }
+      if (cancel) {
+        cancel.style.display = editingPlaceId ? "inline-block" : "none";
+      }
+    }
+
+    function resetPlaceFormValues() {
+      const form = document.getElementById("placeForm");
+      if (form) {
+        form.reset();
+      }
+    }
+
+    function startEditPlace(id) {
+      const targetId = id !== undefined && id !== null ? String(id) : "";
+      if (!targetId) return;
+      const place = currentPlaces.find(entry => entry && String(entry.id) === targetId);
+      if (!place) return;
+
+      editingPlaceId = targetId;
+      const nameInput = document.getElementById("placeName");
+      const typeInput = document.getElementById("placeType");
+      const latInput = document.getElementById("placeLat");
+      const lonInput = document.getElementById("placeLon");
+      if (nameInput) nameInput.value = place.name !== undefined && place.name !== null ? place.name : "";
+      if (typeInput) typeInput.value = place.type !== undefined && place.type !== null ? place.type : "";
+      if (latInput) latInput.value = place.lat !== undefined && place.lat !== null ? place.lat : "";
+      if (lonInput) lonInput.value = place.lon !== undefined && place.lon !== null ? place.lon : "";
+
+      updatePlaceFormState();
+      showPlaceMessage("", "");
+
+      const form = document.getElementById("placeForm");
+      if (form && form.scrollIntoView) {
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+
+    function cancelPlaceEdit(resetMessage = true) {
+      editingPlaceId = null;
+      resetPlaceFormValues();
+      updatePlaceFormState();
+      if (resetMessage) {
+        showPlaceMessage("", "");
+      }
+    }
+
+    async function submitConfig(event) {
+      event.preventDefault();
+
+      const altitudeInput = document.getElementById("cfgAltitude");
+      const speedInput = document.getElementById("cfgSpeed");
+      const timeoutInput = document.getElementById("cfgTimeout");
+
+      const altitude = parseNumberInput(altitudeInput ? altitudeInput.value : "");
+      if (altitude === null || altitude <= 0) {
+        showConfigMessage("Bitte eine gültige Höhen-Schwelle größer 0 eingeben.", "error");
+        return;
+      }
+
+      const speed = parseNumberInput(speedInput ? speedInput.value : "");
+      if (speed === null || speed < 0) {
+        showConfigMessage("Bitte eine gültige Geschwindigkeits-Schwelle eingeben.", "error");
+        return;
+      }
+
+      const timeout = parseNumberInput(timeoutInput ? timeoutInput.value : "");
+      if (timeout === null || timeout < 5) {
+        showConfigMessage("Timeout muss mindestens 5 Sekunden betragen.", "error");
+        return;
+      }
+
+      showConfigMessage("Speichere...", "");
+
+      try {
+        const res = await fetch("/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            altitudeThresholdFt: altitude,
+            speedThresholdKt: speed,
+            offlineTimeoutSec: timeout
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data && data.error ? data.error : `Serverantwort ${res.status}`);
+        }
+
+        currentConfigCache = data;
+        if (altitudeInput && data.altitudeThresholdFt !== undefined) {
+          altitudeInput.value = data.altitudeThresholdFt;
+        }
+        if (speedInput && data.speedThresholdKt !== undefined) {
+          speedInput.value = data.speedThresholdKt;
+        }
+        if (timeoutInput && data.offlineTimeoutSec !== undefined) {
+          timeoutInput.value = data.offlineTimeoutSec;
+        }
+
+        showConfigMessage("Konfiguration gespeichert.", "success");
+      } catch (err) {
+        console.error("[Config] Speichern fehlgeschlagen:", err);
+        showConfigMessage(`Fehler beim Speichern: ${err.message}`, "error");
+      }
+    }
+
+    async function submitPlace(event) {
+      event.preventDefault();
+
+      const nameInput = document.getElementById("placeName");
+      const typeInput = document.getElementById("placeType");
+      const latInput = document.getElementById("placeLat");
+      const lonInput = document.getElementById("placeLon");
+
+      const name = nameInput ? nameInput.value.trim() : "";
+      if (!name) {
+        showPlaceMessage("Bitte einen Namen angeben.", "error");
+        return;
+      }
+
+      const type = typeInput ? typeInput.value.trim() : "";
+      if (!type) {
+        showPlaceMessage("Bitte einen Typ angeben.", "error");
+        return;
+      }
+
+      const lat = parseNumberInput(latInput ? latInput.value : "");
+      if (lat === null || lat < -90 || lat > 90) {
+        showPlaceMessage("Breitengrad muss zwischen -90 und 90 liegen.", "error");
+        return;
+      }
+
+      const lon = parseNumberInput(lonInput ? lonInput.value : "");
+      if (lon === null || lon < -180 || lon > 180) {
+        showPlaceMessage("Längengrad muss zwischen -180 und 180 liegen.", "error");
+        return;
+      }
+
+      const payload = { name, type, lat, lon };
+      const targetId = editingPlaceId ? encodeURIComponent(editingPlaceId) : null;
+      const url = editingPlaceId ? `/places/${targetId}` : "/places";
+      const method = editingPlaceId ? "PUT" : "POST";
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data && data.error ? data.error : `Serverantwort ${res.status}`);
+        }
+
+        showPlaceMessage(editingPlaceId ? "Ort aktualisiert." : "Ort hinzugefügt.", "success");
+        editingPlaceId = null;
+        resetPlaceFormValues();
+        updatePlaceFormState();
+        await refreshPlaces();
+      } catch (err) {
+        console.error("[Places] Speichern fehlgeschlagen:", err);
+        showPlaceMessage(`Fehler beim Speichern: ${err.message}`, "error");
+      }
+    }
+
+    async function deletePlace(id) {
+      const targetId = id !== undefined && id !== null ? String(id) : "";
+      if (!targetId) return;
+
+      const confirmed = window.confirm("Diesen Ort wirklich löschen?");
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`/places/${encodeURIComponent(targetId)}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data && data.error ? data.error : `Serverantwort ${res.status}`);
+        }
+
+        showPlaceMessage("Ort gelöscht.", "success");
+        if (editingPlaceId && String(editingPlaceId) === targetId) {
+          cancelPlaceEdit(false);
+        }
+        await refreshPlaces();
+      } catch (err) {
+        console.error("[Places] Löschen fehlgeschlagen:", err);
+        showPlaceMessage(`Fehler beim Löschen: ${err.message}`, "error");
+      }
+    }
+
+    async function refreshPlaces() {
+      try {
+        const list = await fetchPlaces();
+        currentPlaces = Array.isArray(list) ? list : [];
+        renderPlacesTable(currentPlaces);
+
+        if (editingPlaceId) {
+          const stillExists = currentPlaces.some(place => place && String(place.id) === String(editingPlaceId));
+          if (!stillExists) {
+            cancelPlaceEdit(false);
+          } else {
+            updatePlaceFormState();
+          }
+        }
+      } catch (err) {
+        console.error("[Places] Aktualisierung fehlgeschlagen:", err);
+        showPlaceMessage(`Fehler beim Aktualisieren der Orte: ${err.message}`, "error");
+      }
+    }
+
+    function showConfigMessage(message, type = "") {
+      const el = document.getElementById("configMessage");
+      if (!el) return;
+      el.textContent = message || "";
+      el.className = type ? `settings-message ${type}` : "settings-message";
+    }
+
+    function showPlaceMessage(message, type = "") {
+      const el = document.getElementById("placeFormMessage");
+      if (!el) return;
+      el.textContent = message || "";
+      el.className = type ? `settings-message ${type}` : "settings-message";
+    }
+
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return "";
+      return String(value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      })[char] || char);
+    }
+
+    function formatCoordinate(value) {
+      if (value === null || value === undefined) return "—";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "—";
+      return num.toFixed(5);
+    }
+
+    function parseNumberInput(value) {
+      if (typeof value === "number") {
+        return Number.isFinite(value) ? value : null;
+      }
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
     }
 
   </script>

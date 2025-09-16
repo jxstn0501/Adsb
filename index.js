@@ -16,7 +16,16 @@ const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
 const logCounts = {};     // Zeilenanzahl pro Hex-Datei
 const placesPath = path.join(__dirname, "places.json");
+const configPath = path.join(__dirname, "config.json");
 let places = [];
+
+const DEFAULT_CONFIG = {
+  altitudeThresholdFt: 300,
+  speedThresholdKt: 40,
+  offlineTimeoutSec: 60
+};
+
+let config = { ...DEFAULT_CONFIG };
 
 // ===== Places storage =====
 function loadPlacesFromDisk() {
@@ -81,6 +90,180 @@ function startPlacesWatcher() {
   }
 }
 
+function normalizeConfig(raw) {
+  const normalized = { ...DEFAULT_CONFIG };
+
+  if (!raw || typeof raw !== "object") {
+    return normalized;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "altitudeThresholdFt")) {
+    const value = Number(raw.altitudeThresholdFt);
+    if (Number.isFinite(value) && value > 0) {
+      normalized.altitudeThresholdFt = value;
+    }
+  } else if (Object.prototype.hasOwnProperty.call(config, "altitudeThresholdFt")) {
+    normalized.altitudeThresholdFt = config.altitudeThresholdFt;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "speedThresholdKt")) {
+    const value = Number(raw.speedThresholdKt);
+    if (Number.isFinite(value) && value >= 0) {
+      normalized.speedThresholdKt = value;
+    }
+  } else if (Object.prototype.hasOwnProperty.call(config, "speedThresholdKt")) {
+    normalized.speedThresholdKt = config.speedThresholdKt;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "offlineTimeoutSec")) {
+    const value = Number(raw.offlineTimeoutSec);
+    if (Number.isFinite(value) && value >= 5) {
+      normalized.offlineTimeoutSec = Math.round(value);
+    }
+  } else if (Object.prototype.hasOwnProperty.call(config, "offlineTimeoutSec")) {
+    normalized.offlineTimeoutSec = config.offlineTimeoutSec;
+  }
+
+  return normalized;
+}
+
+function getConfig() {
+  return { ...config };
+}
+
+function getOperationalConfig() {
+  return normalizeConfig(config);
+}
+
+function loadConfigFromDisk() {
+  try {
+    const raw = fs.readFileSync(configPath, "utf8");
+
+    if (!raw.trim()) {
+      config = { ...DEFAULT_CONFIG };
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    config = normalizeConfig(parsed);
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      try {
+        fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
+      } catch (writeErr) {
+        console.error("❌ config.json konnte nicht erstellt werden:", writeErr.message);
+      }
+      config = { ...DEFAULT_CONFIG };
+    } else if (err.name === "SyntaxError") {
+      console.error("❌ Ungültiges JSON in config.json:", err.message);
+      config = { ...DEFAULT_CONFIG };
+    } else {
+      console.error("❌ config.json konnte nicht gelesen werden:", err.message);
+      config = { ...DEFAULT_CONFIG };
+    }
+  }
+}
+
+function saveConfig(newConfig) {
+  config = normalizeConfig(newConfig);
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return getConfig();
+}
+
+function updateConfig(partial) {
+  const merged = { ...config, ...partial };
+  return saveConfig(merged);
+}
+
+function startConfigWatcher() {
+  try {
+    fs.watchFile(configPath, { interval: 1000 }, () => {
+      try {
+        loadConfigFromDisk();
+      } catch (err) {
+        console.error("⚠️ config.json konnte nicht neu geladen werden:", err.message);
+      }
+    });
+  } catch (err) {
+    console.error("⚠️ Beobachten von config.json fehlgeschlagen:", err.message);
+  }
+}
+
+function generatePlaceId() {
+  const list = getPlaces();
+  const numericIds = list
+    .map(place => {
+      if (!place || typeof place.id === "undefined") {
+        return NaN;
+      }
+      const num = Number(place.id);
+      return Number.isInteger(num) && num >= 0 ? num : NaN;
+    })
+    .filter(Number.isFinite);
+
+  if (numericIds.length > 0) {
+    return String(Math.max(...numericIds) + 1);
+  }
+
+  return Date.now().toString(36);
+}
+
+function parsePlacePayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Body muss ein Objekt sein.");
+  }
+
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  if (!name) {
+    throw new Error("Feld 'name' wird benötigt.");
+  }
+
+  const type = typeof payload.type === "string" ? payload.type.trim() : "";
+  if (!type) {
+    throw new Error("Feld 'type' wird benötigt.");
+  }
+
+  const lat = toFiniteNumber(payload.lat);
+  if (lat === null || lat < -90 || lat > 90) {
+    throw new Error("Feld 'lat' muss zwischen -90 und 90 liegen.");
+  }
+
+  const lon = toFiniteNumber(payload.lon);
+  if (lon === null || lon < -180 || lon > 180) {
+    throw new Error("Feld 'lon' muss zwischen -180 und 180 liegen.");
+  }
+
+  return { name, type, lat, lon };
+}
+
+function parseConfigPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Body muss ein Objekt sein.");
+  }
+
+  const altitude = toFiniteNumber(payload.altitudeThresholdFt);
+  if (altitude === null || altitude <= 0) {
+    throw new Error("Feld 'altitudeThresholdFt' muss größer als 0 sein.");
+  }
+
+  const speed = toFiniteNumber(payload.speedThresholdKt);
+  if (speed === null || speed < 0) {
+    throw new Error("Feld 'speedThresholdKt' muss größer oder gleich 0 sein.");
+  }
+
+  const timeout = toFiniteNumber(payload.offlineTimeoutSec);
+  if (timeout === null || timeout < 5) {
+    throw new Error("Feld 'offlineTimeoutSec' muss mindestens 5 Sekunden betragen.");
+  }
+
+  return {
+    altitudeThresholdFt: altitude,
+    speedThresholdKt: speed,
+    offlineTimeoutSec: Math.round(timeout)
+  };
+}
+
 // ===== State loading =====
 fs.mkdirSync(logsDir, { recursive: true });
 
@@ -118,6 +301,8 @@ try {
 
 loadPlacesFromDisk();
 startPlacesWatcher();
+loadConfigFromDisk();
+startConfigWatcher();
 
 // ===== Helpers =====
 function cleanNum(str) {
@@ -237,7 +422,6 @@ function categoriseLanding(record) {
   return { type: "external" };
 }
 
-const ALTITUDE_THRESHOLD_FT = 300;
 const EVENT_WINDOW_MS = 60 * 1000;
 
 function ensureFlightState(hex) {
@@ -292,6 +476,12 @@ function detectEventByLastSeen(record) {
     return state.status;
   }
 
+  const { altitudeThresholdFt, speedThresholdKt, offlineTimeoutSec } = getOperationalConfig();
+  const altitudeThreshold = altitudeThresholdFt > 0 ? altitudeThresholdFt : DEFAULT_CONFIG.altitudeThresholdFt;
+  const effectiveSpeedThreshold = speedThresholdKt > 0 ? speedThresholdKt : null;
+  const offlineTimeout = offlineTimeoutSec >= 5 ? offlineTimeoutSec : DEFAULT_CONFIG.offlineTimeoutSec;
+  const onlineThresholdSec = Math.max(5, Math.min(Math.round(offlineTimeout / 3), offlineTimeout));
+
   const lastSeenSec = record.lastSeen;
   if (lastSeenSec === null) {
     console.warn("⚠️ lastSeen fehlt für", hex);
@@ -300,24 +490,28 @@ function detectEventByLastSeen(record) {
   const prevStatus = state.status;
   let now = prevStatus;
 
+  const exceedsAltitude = record.alt !== null && record.alt > altitudeThreshold;
+  const belowAltitude = record.alt !== null && record.alt < altitudeThreshold;
+  const exceedsSpeed = effectiveSpeedThreshold !== null && record.gs !== null && record.gs > effectiveSpeedThreshold;
+  const belowSpeed = effectiveSpeedThreshold !== null && record.gs !== null && record.gs < effectiveSpeedThreshold;
+  const climbing = record.vr !== null && record.vr > 0;
+  const descendingOrLevel = record.vr !== null && record.vr <= 0;
+
+  const isMoving = exceedsAltitude || exceedsSpeed || climbing;
+  const isGrounded = belowAltitude || belowSpeed || descendingOrLevel;
+
   if (lastSeenSec !== null) {
-    if (lastSeenSec < 10 &&
-        ((record.alt !== null && record.alt > 100) ||
-         (record.vr !== null && record.vr > 0))) {
+    if (lastSeenSec <= onlineThresholdSec && isMoving) {
       now = "online";
-    } else if (lastSeenSec > 50 &&
-               ((record.alt !== null && record.alt < 100) ||
-                (record.vr !== null && record.vr <= 0))) {
+    } else if (lastSeenSec >= offlineTimeout && isGrounded) {
       now = "offline";
     }
   }
 
-  if (record.alt !== null) {
-    if (record.alt > ALTITUDE_THRESHOLD_FT) {
-      state.lastAboveThreshold = timestamp;
-    } else if (record.alt < ALTITUDE_THRESHOLD_FT) {
-      state.lastBelowThreshold = timestamp;
-    }
+  if (exceedsAltitude || exceedsSpeed) {
+    state.lastAboveThreshold = timestamp;
+  } else if (belowAltitude || belowSpeed) {
+    state.lastBelowThreshold = timestamp;
   }
 
   if (now !== prevStatus) {
@@ -325,7 +519,7 @@ function detectEventByLastSeen(record) {
     state.lastStatusChange = timestamp;
 
     if (now === "online") {
-      const skipInitialAirborne = isFirstRecord && record.alt !== null && record.alt > ALTITUDE_THRESHOLD_FT;
+      const skipInitialAirborne = isFirstRecord && (exceedsAltitude || exceedsSpeed);
       state.pendingTakeoff = {
         changeTime: timestamp,
         skipInitialAirborne
@@ -346,7 +540,7 @@ function detectEventByLastSeen(record) {
     const { changeTime, skipInitialAirborne } = state.pendingTakeoff;
 
     if (timestamp - changeTime <= EVENT_WINDOW_MS) {
-      if (record.alt !== null && record.alt > ALTITUDE_THRESHOLD_FT) {
+      if (exceedsAltitude || exceedsSpeed) {
         if (!skipInitialAirborne) {
           registerEvent("takeoff", record);
         }
@@ -592,6 +786,46 @@ function serveStatic(res, filePath) {
   });
 }
 
+function sendJSON(res, statusCode, payload) {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(payload));
+}
+
+function sendError(res, statusCode, message) {
+  sendJSON(res, statusCode, { error: message });
+}
+
+function readJsonBody(req, res, onSuccess) {
+  let body = "";
+  let aborted = false;
+
+  req.on("data", chunk => {
+    if (aborted) return;
+    body += chunk;
+    if (body.length > 1e6) {
+      aborted = true;
+      sendError(res, 413, "Payload zu groß.");
+      req.destroy();
+    }
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    try {
+      const payload = body.trim() ? JSON.parse(body) : {};
+      onSuccess(payload);
+    } catch (err) {
+      sendError(res, 400, "Ungültiger JSON-Body.");
+    }
+  });
+
+  req.on("error", err => {
+    if (aborted) return;
+    console.error("❌ Fehler beim Empfangen des Request-Bodys:", err.message);
+    sendError(res, 500, "Body konnte nicht gelesen werden.");
+  });
+}
+
 // ===== Server =====
 const server = http.createServer((req, res) => {
   const q = url.parse(req.url, true);
@@ -608,102 +842,150 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(events));
 
-  } else if (q.pathname === "/places") {
+  } else if (q.pathname === "/config") {
     if (req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(getPlaces()));
+      sendJSON(res, 200, getOperationalConfig());
       return;
     }
 
     if (req.method === "POST") {
-      let body = "";
-      req.on("data", chunk => {
-        body += chunk;
-      });
-      req.on("end", () => {
-        let payload;
+      readJsonBody(req, res, payload => {
+        let configPayload;
         try {
-          payload = body.trim() ? JSON.parse(body) : null;
+          configPayload = parseConfigPayload(payload);
         } catch (err) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Ungültiger JSON-Body." }));
+          sendError(res, 400, err.message);
           return;
-        }
-
-        if (!payload || typeof payload !== "object") {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Body muss ein Objekt sein." }));
-          return;
-        }
-
-        const idValue = payload.id;
-        if (typeof idValue === "undefined" || idValue === null || idValue === "") {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Feld 'id' wird benötigt." }));
-          return;
-        }
-
-        const list = getPlaces();
-        const idString = String(idValue);
-        const index = list.findIndex(place => place && String(place.id) === idString);
-
-        if (index >= 0) {
-          list[index] = { ...list[index], ...payload };
-        } else {
-          list.push(payload);
         }
 
         try {
-          const updated = savePlaces(list);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(updated));
+          const updated = updateConfig(configPayload);
+          sendJSON(res, 200, updated);
+        } catch (err) {
+          console.error("❌ Speichern von config.json fehlgeschlagen:", err.message);
+          sendError(res, 500, "Konfiguration konnte nicht gespeichert werden.");
+        }
+      });
+      return;
+    }
+
+    sendError(res, 405, "Methode nicht erlaubt.");
+    return;
+
+  } else if (q.pathname.startsWith("/places")) {
+    const segments = q.pathname.split("/").filter(Boolean);
+
+    if (segments.length === 1) {
+      if (req.method === "GET") {
+        sendJSON(res, 200, getPlaces());
+        return;
+      }
+
+      if (req.method === "POST") {
+        readJsonBody(req, res, payload => {
+          let placeData;
+          try {
+            placeData = parsePlacePayload(payload);
+          } catch (err) {
+            sendError(res, 400, err.message);
+            return;
+          }
+
+          const newPlace = { id: generatePlaceId(), ...placeData };
+          const current = getPlaces();
+          const updatedList = [...current, newPlace];
+
+          try {
+            savePlaces(updatedList);
+            sendJSON(res, 201, newPlace);
+          } catch (err) {
+            console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
+            sendError(res, 500, "Ort konnte nicht gespeichert werden.");
+          }
+        });
+        return;
+      }
+
+      sendError(res, 405, "Methode nicht erlaubt.");
+      return;
+    }
+
+    if (segments.length === 2) {
+      let placeId;
+      try {
+        placeId = decodeURIComponent(segments[1]);
+      } catch (err) {
+        sendError(res, 400, "Ungültige ID.");
+        return;
+      }
+
+      if (req.method === "GET") {
+        const entry = getPlaces().find(place => place && String(place.id) === String(placeId));
+        if (!entry) {
+          sendError(res, 404, "Ort nicht gefunden.");
+          return;
+        }
+        sendJSON(res, 200, entry);
+        return;
+      }
+
+      if (req.method === "PUT") {
+        readJsonBody(req, res, payload => {
+          let placeData;
+          try {
+            placeData = parsePlacePayload(payload);
+          } catch (err) {
+            sendError(res, 400, err.message);
+            return;
+          }
+
+          const current = getPlaces();
+          const index = current.findIndex(place => place && String(place.id) === String(placeId));
+
+          if (index < 0) {
+            sendError(res, 404, "Ort nicht gefunden.");
+            return;
+          }
+
+          const updatedPlace = { ...current[index], ...placeData, id: current[index].id ?? placeId };
+          const updatedList = [...current];
+          updatedList[index] = updatedPlace;
+
+          try {
+            savePlaces(updatedList);
+            sendJSON(res, 200, updatedPlace);
+          } catch (err) {
+            console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
+            sendError(res, 500, "Ort konnte nicht gespeichert werden.");
+          }
+        });
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        const current = getPlaces();
+        const filtered = current.filter(place => !(place && String(place.id) === String(placeId)));
+
+        if (filtered.length === current.length) {
+          sendError(res, 404, "Ort nicht gefunden.");
+          return;
+        }
+
+        try {
+          savePlaces(filtered);
+          sendJSON(res, 200, { success: true });
         } catch (err) {
           console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Speichern fehlgeschlagen." }));
+          sendError(res, 500, "Ort konnte nicht gelöscht werden.");
         }
-      });
-      req.on("error", err => {
-        console.error("❌ Fehler beim Empfangen des Request-Bodys:", err.message);
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Body konnte nicht gelesen werden." }));
-      });
-      return;
-    }
-
-    if (req.method === "DELETE") {
-      const rawId = Array.isArray(q.query.id) ? q.query.id[0] : q.query.id;
-      const idString = typeof rawId === "string" ? rawId.trim() : rawId;
-
-      if (!idString) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Parameter 'id' wird benötigt." }));
         return;
       }
 
-      const list = getPlaces();
-      const filtered = list.filter(place => !(place && String(place.id) === String(idString)));
-
-      if (filtered.length === list.length) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Ort nicht gefunden." }));
-        return;
-      }
-
-      try {
-        const updated = savePlaces(filtered);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(updated));
-      } catch (err) {
-        console.error("❌ Speichern von places.json fehlgeschlagen:", err.message);
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Löschen fehlgeschlagen." }));
-      }
+      sendError(res, 405, "Methode nicht erlaubt.");
       return;
     }
 
-    res.writeHead(405, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Methode nicht erlaubt." }));
+    sendError(res, 404, "Pfad nicht gefunden.");
     return;
 
   } else if (q.pathname === "/set") {
