@@ -492,13 +492,12 @@
             const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
             const latParam = hasCoords ? latNum.toFixed(6) : "null";
             const lonParam = hasCoords ? lonNum.toFixed(6) : "null";
-            const place = ev && ev.place && (ev.place.name || ev.place.type)
-              ? `<br>Ort: ${ev.place.name ? escapeHtml(ev.place.name) : "—"}${ev.place.type ? ` (${escapeHtml(ev.place.type)})` : ""}`
-              : "";
+            const locationHtml = buildEventLocationHtml(type, ev.place);
 
             const entryContent = `<b>${escapeHtml(typeRaw || '').toUpperCase()}</b> – ${escapeHtml(ev.callsign||ev.hex||'—')}<br>
           Alt: ${escapeHtml(ev.alt||'—')} ft | Speed: ${escapeHtml(ev.gs||'—')} kt<br>
-          ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}${place}<br>
+          ${locationHtml}<br>
+          ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}<br>
           <small>${escapeHtml(ev.time||'')}</small>`;
 
             if (hasCoords) {
@@ -518,6 +517,60 @@
       html += '</div>';
       document.getElementById("content").innerHTML = html;
       closeSidebar();
+    }
+
+    function buildEventLocationHtml(eventType, placeInfo) {
+      const normalizedType = typeof eventType === "string" ? eventType.toLowerCase() : "";
+      const fallback = normalizedType === "landing"
+        ? "Außenlandung"
+        : normalizedType === "takeoff"
+          ? "Außentakeoff"
+          : "Externes Ereignis";
+
+      if (placeInfo === null || placeInfo === undefined) {
+        return escapeHtml(fallback);
+      }
+
+      if (typeof placeInfo === "string") {
+        const trimmed = placeInfo.trim();
+        return trimmed ? `Ort: ${escapeHtml(trimmed)}` : escapeHtml(fallback);
+      }
+
+      if (typeof placeInfo !== "object") {
+        return escapeHtml(fallback);
+      }
+
+      const typeRaw = placeInfo.type !== undefined && placeInfo.type !== null
+        ? String(placeInfo.type).trim()
+        : "";
+
+      if (typeRaw.toLowerCase() === "external") {
+        return escapeHtml(fallback);
+      }
+
+      const nameRaw = placeInfo.name !== undefined && placeInfo.name !== null
+        ? String(placeInfo.name).trim()
+        : "";
+      const typeLabelRaw = typeRaw && typeRaw.toLowerCase() !== "unknown"
+        ? typeRaw
+        : "";
+
+      if (!nameRaw && !typeLabelRaw) {
+        return escapeHtml(fallback);
+      }
+
+      const nameHtml = nameRaw ? escapeHtml(nameRaw) : "";
+      const typeHtml = typeLabelRaw ? escapeHtml(typeLabelRaw) : "";
+
+      if (nameRaw && typeLabelRaw) {
+        return `Ort: ${nameHtml} (${typeHtml})`;
+      }
+
+      if (nameRaw) {
+        return `Ort: ${nameHtml}`;
+      }
+
+      return `Ort: ${typeHtml}`;
     }
 
     async function showLogs() {

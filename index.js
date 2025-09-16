@@ -488,9 +488,9 @@ function haversine(lat1, lon1, lat2, lon2) {
   return EARTH_RADIUS * c;
 }
 
-const LANDING_MATCH_RADIUS_METERS = 500;
+const PLACE_MATCH_RADIUS_METERS = 500;
 
-function categoriseLanding(record) {
+function determinePlaceForRecord(record) {
   if (!record || typeof record !== "object") {
     return { type: "external" };
   }
@@ -533,7 +533,7 @@ function categoriseLanding(record) {
     }
   }
 
-  if (nearest && nearestDistance <= LANDING_MATCH_RADIUS_METERS) {
+  if (nearest && nearestDistance <= PLACE_MATCH_RADIUS_METERS) {
     const { place, lat: placeLat, lon: placeLon } = nearest;
     const name =
       typeof place.name === "string" && place.name.trim()
@@ -659,7 +659,7 @@ async function detectEventByLastSeen(record) {
       if (prevStatus === "online" &&
           state.lastBelowThreshold !== null &&
           timestamp - state.lastBelowThreshold <= EVENT_WINDOW_MS) {
-        const place = categoriseLanding(record);
+        const place = determinePlaceForRecord(record);
         await registerEvent("landing", record, { place });
       }
     }
@@ -671,7 +671,8 @@ async function detectEventByLastSeen(record) {
     if (timestamp - changeTime <= EVENT_WINDOW_MS) {
       if (exceedsAltitude || exceedsSpeed) {
         if (!skipInitialAirborne) {
-          await registerEvent("takeoff", record);
+          const place = determinePlaceForRecord(record);
+          await registerEvent("takeoff", record, { place });
         }
         state.pendingTakeoff = null;
       }
