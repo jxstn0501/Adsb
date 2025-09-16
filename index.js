@@ -383,6 +383,10 @@ function parseLastSeen(raw) {
   const text = String(raw).trim().toLowerCase();
   if (!text) return null;
 
+  if (text === "live" || text === "now") {
+    return 0;
+  }
+
   const pattern = /([\d.,]+)\s*(ms|s|sec|secs|second|seconds|m|min|minute|minutes|h|hr|hour|hours)?/g;
   let totalSeconds = 0;
   let found = false;
@@ -405,6 +409,37 @@ function parseLastSeen(raw) {
       totalSeconds += value / 1000;
     } else {
       totalSeconds += value;
+    }
+  }
+
+  if (!found) {
+    const colonCandidate = text.replace(/[^0-9:.,]/g, "");
+    if (colonCandidate.includes(":")) {
+      const segments = colonCandidate
+        .split(":")
+        .map(part => part.replace(/,/g, ".").trim())
+        .filter(part => part.length > 0);
+
+      if (segments.length >= 2 && segments.length <= 3) {
+        const numbers = segments.map(segment => Number(segment));
+        if (numbers.every(num => Number.isFinite(num))) {
+          const [first, second, third] = numbers;
+          if (segments.length === 3) {
+            totalSeconds = first * 3600 + second * 60 + third;
+          } else {
+            totalSeconds = first * 60 + second;
+          }
+          found = true;
+        }
+      }
+    }
+  }
+
+  if (!found) {
+    const direct = Number(text.replace(/,/g, "."));
+    if (Number.isFinite(direct)) {
+      totalSeconds = direct;
+      found = true;
     }
   }
 
