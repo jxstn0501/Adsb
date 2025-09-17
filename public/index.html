@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -30,7 +32,7 @@
   </script>
 </head>
 <body class="min-h-screen bg-slate-100 font-sans text-slate-900 antialiased">
-  <div class="flex h-screen overflow-hidden">
+  <div class="flex min-h-[100dvh] w-full">
     <aside
       id="sidebar"
       class="fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full transform flex-col justify-between gap-8 overflow-y-auto bg-slate-900/95 px-6 py-8 text-white shadow-2xl transition-all duration-300 ease-in-out lg:static lg:inset-auto lg:translate-x-0 lg:bg-slate-900 lg:shadow-none"
@@ -104,7 +106,7 @@
       </div>
     </aside>
 
-    <div class="flex flex-1 flex-col bg-gradient-to-br from-slate-100 via-white to-slate-200 lg:ml-72">
+    <div class="flex min-w-0 flex-1 flex-col bg-gradient-to-br from-slate-100 via-white to-slate-200 lg:ml-72">
       <header class="relative z-20 flex h-20 items-center justify-between bg-brand-red px-6 shadow-lg shadow-brand-red/30">
         <div class="flex items-center gap-4">
           <button
@@ -126,7 +128,7 @@
         </div>
       </header>
 
-      <main id="content" class="relative flex-1 overflow-y-auto px-6 py-8">
+      <main id="content" class="relative flex-1 min-w-0 overflow-y-auto px-4 py-8 sm:px-6">
         <div class="flex h-full items-center justify-center">
           <div class="rounded-3xl bg-white/80 px-8 py-6 text-base font-medium text-slate-600 shadow-card backdrop-blur">
             Lade Daten...
@@ -152,6 +154,7 @@
     let nominatimSelectedIndex = null;
     let nominatimSearchToken = 0;
     let activeView = "map";
+    let activeEventMap = null;
     const iconBaseClasses = ["bg-white/10", "text-white/80", "shadow-inner", "ring-1", "ring-white/10"];
     const iconActiveBaseClasses = ["bg-white", "shadow-lg", "ring-2", "ring-white/80"];
     const iconActiveTextClasses = ["text-brand-red", "text-brand-purple", "text-sky-600", "text-emerald-600"];
@@ -163,6 +166,45 @@
     };
 
     window.addEventListener("DOMContentLoaded", initializeTracker);
+
+    function formatDateTime(value) {
+      if (!value && value !== 0) {
+        return "—";
+      }
+      const date = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+        return String(value ?? "—");
+      }
+
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, "0");
+      const minutes = String(date.getMinutes()).padStart(2, "0");
+
+      return `${day}.${month}.${year} ${hours}:${minutes}`;
+    }
+
+    function formatMetricValue(value, suffix) {
+      if (value === null || value === undefined) {
+        return "—";
+      }
+      const text = String(value).trim();
+      if (!text) {
+        return "—";
+      }
+      return suffix ? `${text} ${suffix}` : text;
+    }
+
+    function cleanupEventMap() {
+      if (activeEventMap) {
+        activeEventMap.remove();
+        activeEventMap = null;
+      }
+    }
 
     function setActiveView(view) {
       activeView = view;
@@ -278,6 +320,7 @@
     }
 
     function renderMap(hex = currentHex) {
+      cleanupEventMap();
       if (!hex) {
         const container = document.getElementById("content");
         if (container) {
@@ -313,86 +356,152 @@
         </div>`;
     }
 
-    function openMap(lat, lon) {
+    function openEventFromEncoded(encodedEvent) {
+      if (typeof encodedEvent !== "string" || !encodedEvent) {
+        console.warn("[Events] Kein Event ausgewählt.");
+        return;
+      }
+
+      try {
+        const decoded = decodeURIComponent(encodedEvent);
+        const payload = JSON.parse(decoded);
+        renderEventDetail(payload);
+      } catch (err) {
+        console.error("[Events] Event konnte nicht geöffnet werden:", err);
+      }
+    }
+
+    function renderEventDetail(event) {
       stopSettingsInterval();
-      setActiveView("map");
+      setActiveView("events");
       closeSidebar();
+
+      cleanupEventMap();
 
       const target = document.getElementById("content");
       if (!target) return;
 
-      const invalidMessage = createStatusCard("Ungültige Koordinaten für dieses Event.");
+      const latRaw = event && Object.prototype.hasOwnProperty.call(event, "lat") ? event.lat : null;
+      const lonRaw = event && Object.prototype.hasOwnProperty.call(event, "lon") ? event.lon : null;
+      const latNum = typeof latRaw === "number" ? latRaw : Number(latRaw);
+      const lonNum = typeof lonRaw === "number" ? lonRaw : Number(lonRaw);
+      const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+      const latStr = hasCoords ? latNum.toFixed(6) : "—";
+      const lonStr = hasCoords ? lonNum.toFixed(6) : "—";
+      const coordinateLabel = hasCoords ? `${latStr}, ${lonStr}` : "Keine Koordinaten verfügbar";
+      const fallbackMessage = hasCoords
+        ? "Karte konnte nicht geladen werden."
+        : "Keine Koordinaten für dieses Event vorhanden.";
+      const mapsLink = hasCoords
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latStr},${lonStr}`)}`
+        : null;
 
-      if (lat === null || lat === undefined || lon === null || lon === undefined) {
-        target.innerHTML = invalidMessage;
-        return;
-      }
+      const typeRaw = typeof event?.type === "string" ? event.type : "";
+      const typeLabel = typeRaw ? typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1) : "Event";
+      const callsign = event?.callsign || event?.hex || "—";
+      const hexLabel = event?.hex ? String(event.hex).toUpperCase() : String(callsign || "—").toUpperCase();
+      const timeLabel = formatDateTime(event?.time);
+      const locationLabel = getEventLocationLabel(event);
+      const altitudeLabel = formatMetricValue(event?.alt, "ft");
+      const speedLabel = formatMetricValue(event?.gs, "kt");
 
-      const latNum = typeof lat === "number" ? lat : Number(lat);
-      const lonNum = typeof lon === "number" ? lon : Number(lon);
+      const mapAction = mapsLink
+        ? `<a
+              href="${mapsLink}"
+              target="_blank"
+              rel="noopener"
+              class="inline-flex items-center gap-2 rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5H19.5V10.5M19.5 4.5L12 12" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12.75V18a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18V6.75A2.25 2.25 0 016.75 4.5H12" />
+              </svg>
+              In Maps öffnen
+            </a>`
+        : `<span class="inline-flex items-center gap-2 rounded-full bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-500 opacity-70">Keine Koordinaten verfügbar</span>`;
 
-      if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
-        target.innerHTML = invalidMessage;
-        return;
-      }
-
-      const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-      const latPadding = 0.01;
-      const lonPadding = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)) * 0.02);
-
-      const minLat = clamp(latNum - latPadding, -90, 90);
-      const maxLat = clamp(latNum + latPadding, -90, 90);
-      let minLon = clamp(lonNum - lonPadding, -180, 180);
-      let maxLon = clamp(lonNum + lonPadding, -180, 180);
-
-      if (minLon > maxLon) {
-        const swap = minLon;
-        minLon = maxLon;
-        maxLon = swap;
-      }
-
-      const latStr = latNum.toFixed(6);
-      const lonStr = lonNum.toFixed(6);
-      const bbox = [minLon, minLat, maxLon, maxLat].map(value => value.toFixed(6));
-      const bboxParam = bbox.map(value => encodeURIComponent(value)).join("%2C");
-      const markerParam = `${encodeURIComponent(latStr)}%2C${encodeURIComponent(lonStr)}`;
-      const embedSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${bboxParam}&layer=mapnik&marker=${markerParam}`;
-      const externalLink = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latStr)}&mlon=${encodeURIComponent(lonStr)}#map=15/${encodeURIComponent(latStr)}/${encodeURIComponent(lonStr)}`;
-
-      const html = `
+      target.innerHTML = `
         <div class="space-y-6">
           <div class="rounded-[2.5rem] bg-white/90 p-6 shadow-card ring-1 ring-white/40 backdrop-blur">
-            <div class="relative h-[60vh] min-h-[24rem] overflow-hidden rounded-[2rem] bg-slate-200">
-              <iframe src="${embedSrc}" class="absolute inset-0 h-full w-full border-0" loading="lazy" referrerpolicy="no-referrer"></iframe>
-              <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-900/10 via-transparent to-slate-900/20"></div>
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div class="flex items-center gap-4">
+                <button
+                  type="button"
+                  onclick="showEvents()"
+                  class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200/60 bg-white/60 text-slate-600 shadow-sm transition hover:bg-white"
+                  aria-label="Zurück zu den Events"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+                <div class="space-y-1">
+                  <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">${escapeHtml(typeLabel)}</p>
+                  <h2 class="text-2xl font-semibold text-slate-900">${escapeHtml(callsign)}</h2>
+                  <p class="text-sm text-slate-500">${escapeHtml(timeLabel)}</p>
+                </div>
+              </div>
+              <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">HEX ${escapeHtml(hexLabel)}</span>
+            </div>
+            <div class="relative mt-6 h-[60vh] min-h-[24rem] overflow-hidden rounded-[2rem] bg-slate-200">
+              <div id="eventMap" class="absolute inset-0 h-full w-full ${hasCoords ? "" : "hidden"}"></div>
+              <div id="eventMapFallback" class="absolute inset-0 flex items-center justify-center bg-slate-200 text-sm font-medium text-slate-600 ${hasCoords ? "hidden" : ""}">${escapeHtml(fallbackMessage)}</div>
+              <div id="eventMapOverlay" class="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-900/10 via-transparent to-slate-900/20 ${hasCoords ? "" : "hidden"}"></div>
             </div>
             <div class="mt-6 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">Event Position</p>
-                <p class="mt-2 text-2xl font-semibold text-slate-900">${latStr}, ${lonStr}</p>
-                <p class="mt-2 text-sm text-slate-500">Zoom auf das Ereignis im OpenStreetMap-Viewer.</p>
+                <p class="mt-2 text-2xl font-semibold text-slate-900">${escapeHtml(coordinateLabel)}</p>
+                <p class="mt-2 text-sm text-slate-500">Satellitenansicht des Ereignisses.</p>
               </div>
-              <a
-                href="${externalLink}"
-                target="_blank"
-                rel="noopener"
-                class="inline-flex items-center gap-2 rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5H19.5V10.5M19.5 4.5L12 12" />
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12.75V18a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18V6.75A2.25 2.25 0 016.75 4.5H12" />
-                </svg>
-                Karte öffnen
-              </a>
+              ${mapAction}
             </div>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            ${createInfoCard("Latitude", latStr)}
-            ${createInfoCard("Longitude", lonStr)}
+          <div class="grid gap-4 sm:grid-cols-3">
+            ${createInfoCard("Ort", locationLabel)}
+            ${createInfoCard("Speed", speedLabel)}
+            ${createInfoCard("Altitude", altitudeLabel)}
           </div>
         </div>`;
 
-      target.innerHTML = html;
+      target.scrollTop = 0;
+
+      if (!hasCoords) {
+        return;
+      }
+
+      const mapContainer = document.getElementById("eventMap");
+      const fallbackEl = document.getElementById("eventMapFallback");
+      const overlayEl = document.getElementById("eventMapOverlay");
+
+      if (typeof L !== "undefined" && mapContainer) {
+        activeEventMap = L.map(mapContainer, { zoomControl: false });
+        L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+          maxZoom: 19,
+          attribution: 'Imagery © <a href="https://www.esri.com/">Esri</a>, Earthstar Geographics'
+        }).addTo(activeEventMap);
+        L.marker([latNum, lonNum]).addTo(activeEventMap);
+        activeEventMap.setView([latNum, lonNum], 16);
+        if (fallbackEl) {
+          fallbackEl.classList.add("hidden");
+        }
+        if (overlayEl) {
+          overlayEl.classList.remove("hidden");
+        }
+        setTimeout(() => {
+          if (activeEventMap) {
+            activeEventMap.invalidateSize();
+          }
+        }, 0);
+      } else {
+        if (fallbackEl) {
+          fallbackEl.classList.remove("hidden");
+          fallbackEl.textContent = "Karte konnte nicht geladen werden.";
+        }
+        if (overlayEl) {
+          overlayEl.classList.add("hidden");
+        }
+      }
     }
 
     function createInfoCard(label, value) {
@@ -454,6 +563,7 @@
       stopSettingsInterval();
       setActiveView("events");
       closeSidebar();
+      cleanupEventMap();
 
       const container = document.getElementById("content");
       if (!container) return;
@@ -490,9 +600,9 @@
           const accentClass = isLanding ? "bg-emerald-500/10 text-emerald-600" : "bg-brand-red/10 text-brand-red";
 
           const callsign = escapeHtml(event.callsign || event.hex || "—");
-          const altitude = escapeHtml(event.alt || "—");
-          const speed = escapeHtml(event.gs || "—");
-          const time = escapeHtml(event.time || "");
+          const altitude = escapeHtml(formatMetricValue(event.alt, "ft"));
+          const speed = escapeHtml(formatMetricValue(event.gs, "kt"));
+          const time = escapeHtml(formatDateTime(event.time));
 
           const latNum = Number(event.lat);
           const lonNum = Number(event.lon);
@@ -501,16 +611,29 @@
           const lonFixed = hasCoords ? lonNum.toFixed(6) : null;
           const positionLabel = hasCoords
             ? `${latFixed}°, ${lonFixed}°`
-            : `${escapeHtml(event.lat || "—")}, ${escapeHtml(event.lon || "—")}`;
+            : `${event.lat ?? "—"}, ${event.lon ?? "—"}`;
+          const safePositionLabel = escapeHtml(positionLabel);
 
-          const place = formatEventPlace(event.place);
+          const place = formatEventPlace(event.place, type);
+
+          const eventPayload = {
+            time: event.time ?? null,
+            type: typeRaw || null,
+            hex: event.hex ?? null,
+            callsign: event.callsign ?? null,
+            lat: hasCoords ? Number(latNum.toFixed(6)) : null,
+            lon: hasCoords ? Number(lonNum.toFixed(6)) : null,
+            alt: event.alt ?? null,
+            gs: event.gs ?? null,
+            place: event.place ?? null
+          };
+          const encodedEvent = encodeURIComponent(JSON.stringify(eventPayload));
+
           const actionHint = hasCoords
-            ? '<div class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-brand-purple transition-all duration-300 ease-in-out group-hover:translate-x-1">Auf Karte anzeigen<span aria-hidden="true">→</span></div>'
-            : '<div class="mt-6 text-sm text-slate-400">Keine Koordinaten verfügbar</div>';
+            ? '<div class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-brand-purple transition-all duration-300 ease-in-out group-hover:translate-x-1">Eventdetails anzeigen<span aria-hidden="true">→</span></div>'
+            : '<div class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-slate-400">Eventdetails anzeigen<span aria-hidden="true">→</span></div>';
 
-          const attributes = hasCoords
-            ? `type="button" onclick="openMap(${latFixed}, ${lonFixed})"`
-            : 'type="button" disabled aria-disabled="true"';
+          const attributes = `type="button" onclick="openEventFromEncoded('${encodedEvent}')"`;
 
           return `
             <button ${attributes} class="group relative w-full overflow-hidden rounded-3xl bg-white/90 p-6 text-left shadow-card ring-1 ring-white/40 backdrop-blur transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50 disabled:cursor-not-allowed disabled:opacity-60">
@@ -527,15 +650,15 @@
               <div class="mt-6 grid gap-4 text-sm text-slate-600 sm:grid-cols-2">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Altitude</p>
-                  <p class="mt-2 text-base font-semibold text-slate-800">${altitude} ft</p>
+                  <p class="mt-2 text-base font-semibold text-slate-800">${altitude}</p>
                 </div>
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Speed</p>
-                  <p class="mt-2 text-base font-semibold text-slate-800">${speed} kt</p>
+                  <p class="mt-2 text-base font-semibold text-slate-800">${speed}</p>
                 </div>
                 <div class="sm:col-span-2">
                   <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Position</p>
-                  <p class="mt-2 font-medium text-slate-700">${positionLabel}</p>
+                  <p class="mt-2 font-medium text-slate-700">${safePositionLabel}</p>
                 </div>
                 <div class="sm:col-span-2">
                   <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Ort</p>
@@ -552,7 +675,7 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Events</p>
                 <h2 class="text-3xl font-semibold text-slate-900">Takeoff & Landing</h2>
-                <p class="text-sm text-slate-500">Klicke auf ein Event, um die Karte zu zentrieren.</p>
+                <p class="text-sm text-slate-500">Klicke auf ein Event, um Details zu öffnen.</p>
               </div>
               <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">Live Feed</span>
             </div>
@@ -570,30 +693,69 @@
       }
     }
 
-    function formatEventPlace(place) {
+    function getFallbackLocationLabel(eventType) {
+      const normalized = typeof eventType === "string" ? eventType.toLowerCase() : "";
+      if (normalized === "landing") {
+        return "Außenlandung";
+      }
+      if (normalized === "takeoff") {
+        return "Außenstart";
+      }
+      return "Unbekannter Ort";
+    }
+
+    function extractPlaceLabel(place) {
       if (!place) {
-        return escapeHtml("—");
+        return null;
       }
 
       if (typeof place === "string") {
-        return escapeHtml(place);
+        const trimmed = place.trim();
+        return trimmed || null;
       }
 
       if (typeof place === "object") {
+        const rawType = typeof place.type === "string" ? place.type.trim() : "";
+        const typeNormalized = rawType.toLowerCase();
+        if (typeNormalized === "external") {
+          return null;
+        }
+
         const segments = [];
-        if (place.name) segments.push(String(place.name));
-        if (place.city) segments.push(String(place.city));
-        if (place.type) segments.push(String(place.type));
-        return escapeHtml(segments.join(" • ") || "—");
+        if (place.name) segments.push(String(place.name).trim());
+        if (place.city) segments.push(String(place.city).trim());
+        if (rawType && typeNormalized !== "unknown" && typeNormalized !== "external") {
+          segments.push(rawType);
+        }
+
+        const text = segments.filter(Boolean).join(" • ").trim();
+        return text || null;
       }
 
-      return escapeHtml(String(place));
+      const text = String(place).trim();
+      return text || null;
+    }
+
+    function formatEventPlace(place, eventType) {
+      const label = extractPlaceLabel(place);
+      const output = label || getFallbackLocationLabel(eventType);
+      return escapeHtml(output);
+    }
+
+    function getEventLocationLabel(event) {
+      if (!event) {
+        return getFallbackLocationLabel();
+      }
+
+      const label = extractPlaceLabel(event.place);
+      return label || getFallbackLocationLabel(event.type);
     }
 
     async function showLogs() {
       stopSettingsInterval();
       setActiveView("logs");
       closeSidebar();
+      cleanupEventMap();
 
       const container = document.getElementById("content");
       if (!container) return;
@@ -627,25 +789,20 @@
           return;
         }
 
-        const formatMetric = (value, suffix) => {
-          if (value === null || value === undefined) return "—";
-          const text = String(value).trim();
-          if (!text) return "—";
-          return `${escapeHtml(text)} ${suffix}`;
-        };
-
         const rows = data.slice(-200).reverse().map(entry => {
-          const time = escapeHtml(entry.time || "");
+          const time = escapeHtml(formatDateTime(entry.time));
           const callsign = escapeHtml(entry.callsign || entry.hex || "—");
           const hex = entry.hex ? escapeHtml(entry.hex) : "";
-          const altitude = formatMetric(entry.alt, "ft");
-          const speed = formatMetric(entry.gs, "kt");
+          const altitude = escapeHtml(formatMetricValue(entry.alt, "ft"));
+          const speed = escapeHtml(formatMetricValue(entry.gs, "kt"));
 
           const latNum = Number(entry.lat);
           const lonNum = Number(entry.lon);
-          const position = Number.isFinite(latNum) && Number.isFinite(lonNum)
+          const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+          const position = hasCoords
             ? `${latNum.toFixed(4)}°, ${lonNum.toFixed(4)}°`
-            : `${escapeHtml(entry.lat || "—")}, ${escapeHtml(entry.lon || "—")}`;
+            : `${entry.lat ?? "—"}, ${entry.lon ?? "—"}`;
+          const safePosition = escapeHtml(position);
 
           const hexLine = hex ? `<div class="text-xs uppercase tracking-[0.3em] text-slate-400">${hex}</div>` : "";
 
@@ -659,7 +816,7 @@
               <td class="px-4 py-3 text-sm font-medium text-slate-700">${altitude}</td>
               <td class="px-4 py-3 text-sm font-medium text-slate-700">${speed}</td>
               <td class="px-4 py-3 text-sm text-slate-600">
-                <div class="font-medium text-slate-700">${position}</div>
+                <div class="font-medium text-slate-700">${safePosition}</div>
                 <div class="text-xs text-slate-400">Lat • Lon</div>
               </td>
             </tr>`;
@@ -676,7 +833,7 @@
               <span class="rounded-full bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-600">HEX ${currentHex.toUpperCase()}</span>
             </div>
             <div class="rounded-3xl bg-white/90 shadow-card ring-1 ring-white/40 backdrop-blur">
-              <div class="max-h-[70vh] overflow-auto">
+              <div class="max-h-[70vh] overflow-x-auto overflow-y-auto">
                 <table class="min-w-full table-fixed divide-y divide-slate-100 text-left">
                   <thead class="sticky top-0 bg-white/95 backdrop-blur">
                     <tr class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
@@ -759,7 +916,7 @@
         const d = await res.json();
         if (!d || !d.time) return;
         const row = `<tr class="divide-x divide-slate-100/60">
-        <td class="px-3 py-2 text-sm font-medium text-slate-700">${escapeHtml(d.time)}</td>
+        <td class="px-3 py-2 text-sm font-medium text-slate-700">${escapeHtml(formatDateTime(d.time))}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.callsign)}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.hex)}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.reg)}</td>
@@ -782,6 +939,7 @@
       stopSettingsInterval();
       setActiveView("settings");
       closeSidebar();
+      cleanupEventMap();
 
       const container = document.getElementById("content");
       if (container) {
