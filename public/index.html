@@ -33,7 +33,7 @@
   <div class="flex h-screen overflow-hidden">
     <aside
       id="sidebar"
-      class="fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full transform flex-col justify-between gap-8 overflow-y-auto bg-slate-900/95 px-6 py-8 text-white shadow-2xl transition-transform duration-300 ease-in-out lg:static lg:inset-auto lg:translate-x-0 lg:shadow-none lg:bg-slate-900"
+      class="fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full transform flex-col justify-between gap-8 overflow-y-auto bg-slate-900/95 px-6 py-8 text-white shadow-2xl transition-all duration-300 ease-in-out lg:static lg:inset-auto lg:translate-x-0 lg:bg-slate-900 lg:shadow-none"
     >
       <div>
         <div class="flex items-center gap-3 rounded-3xl bg-white/10 px-5 py-4 backdrop-blur">
@@ -45,26 +45,28 @@
             <p class="text-lg font-semibold tracking-wide">Heli Tracker</p>
           </div>
         </div>
-        <nav class="mt-10 space-y-3">
+        <nav class="mt-10 space-y-2">
           <button
+            data-view="map"
             onclick="showADSB()"
-            class="group flex w-full items-center justify-between rounded-full bg-white/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            class="sidebar-button group flex w-full items-center justify-between rounded-2xl px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white/70 ring-1 ring-white/5 transition-all duration-300 ease-in-out hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
           >
             <span class="flex items-center gap-3">
-              <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+              <span class="sidebar-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-lg text-white/80 shadow-inner ring-1 ring-white/10 transition-all duration-300 ease-in-out">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12m-1.5 0v8.25a1.5 1.5 0 01-1.5 1.5h-3.75m-9 0H3.75a1.5 1.5 0 01-1.5-1.5V12" />
                 </svg>
               </span>
               <span>Map</span>
             </span>
-            <span class="rounded-full bg-white/20 px-3 py-1 text-[0.65rem] font-medium tracking-[0.4em] text-white/70 transition group-hover:bg-white/30">LIVE</span>
+            <span class="sidebar-badge rounded-full bg-white/10 px-3 py-1 text-[0.65rem] font-medium tracking-[0.4em] text-white/70 transition-all duration-300 ease-in-out">LIVE</span>
           </button>
           <button
+            data-view="events"
             onclick="showEvents()"
-            class="group flex w-full items-center gap-3 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            class="sidebar-button group flex w-full items-center gap-3 rounded-2xl px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white/70 ring-1 ring-white/5 transition-all duration-300 ease-in-out hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
           >
-            <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+            <span class="sidebar-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-lg text-white/80 shadow-inner ring-1 ring-white/10 transition-all duration-300 ease-in-out">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h18m-16.5 6h15m-13.5 6h12" />
               </svg>
@@ -72,10 +74,11 @@
             <span class="flex-1 text-left">Events</span>
           </button>
           <button
+            data-view="logs"
             onclick="showLogs()"
-            class="group flex w-full items-center gap-3 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            class="sidebar-button group flex w-full items-center gap-3 rounded-2xl px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white/70 ring-1 ring-white/5 transition-all duration-300 ease-in-out hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
           >
-            <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+            <span class="sidebar-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-lg text-white/80 shadow-inner ring-1 ring-white/10 transition-all duration-300 ease-in-out">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.25h13.5m-13.5 4.5h13.5m-13.5 4.5h9" />
               </svg>
@@ -83,10 +86,11 @@
             <span class="flex-1 text-left">Logs</span>
           </button>
           <button
+            data-view="settings"
             onclick="showSettings()"
-            class="group flex w-full items-center gap-3 rounded-full bg-brand-purple/80 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            class="sidebar-button group flex w-full items-center gap-3 rounded-2xl px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white/70 ring-1 ring-white/5 transition-all duration-300 ease-in-out hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
           >
-            <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+            <span class="sidebar-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-lg text-white/80 shadow-inner ring-1 ring-white/10 transition-all duration-300 ease-in-out">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 4.5l.41-1.233A.75.75 0 0112.38 3h.24a.75.75 0 01.72.533L13.75 4.5h1.5l.41-1.233A.75.75 0 0116.88 3h.24a.75.75 0 01.72.533L18.25 4.5m-7 16.5l-.41 1.233a.75.75 0 01-.72.533h-.24a.75.75 0 01-.72-.533L8.75 21h-1.5l-.41 1.233a.75.75 0 01-.72.533h-.24a.75.75 0 01-.72-.533L4.75 21m15-16.5H4.25a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25z" />
               </svg>
@@ -147,8 +151,57 @@
     let nominatimResults = [];
     let nominatimSelectedIndex = null;
     let nominatimSearchToken = 0;
+    let activeView = "map";
+    const iconBaseClasses = ["bg-white/10", "text-white/80", "shadow-inner", "ring-1", "ring-white/10"];
+    const iconActiveBaseClasses = ["bg-white", "shadow-lg", "ring-2", "ring-white/80"];
+    const iconActiveTextClasses = ["text-brand-red", "text-brand-purple", "text-sky-600", "text-emerald-600"];
+    const iconActiveMap = {
+      map: "text-brand-red",
+      events: "text-brand-purple",
+      logs: "text-sky-600",
+      settings: "text-emerald-600"
+    };
 
     window.addEventListener("DOMContentLoaded", initializeTracker);
+
+    function setActiveView(view) {
+      activeView = view;
+      const buttons = document.querySelectorAll('[data-view]');
+
+      buttons.forEach(button => {
+        button.classList.remove("bg-white/20", "text-white", "shadow-xl", "ring-1", "ring-white/20");
+        button.classList.add("text-white/70", "ring-1", "ring-white/5");
+        button.removeAttribute("aria-current");
+
+        const icon = button.querySelector('.sidebar-icon');
+        if (icon) {
+          icon.classList.remove(...iconActiveBaseClasses, ...iconActiveTextClasses);
+          icon.classList.add(...iconBaseClasses);
+        }
+
+        const badge = button.querySelector('.sidebar-badge');
+        if (badge) {
+          badge.classList.remove("bg-white/90", "text-brand-red", "shadow");
+          badge.classList.add("bg-white/10", "text-white/70");
+        }
+
+        if (button.dataset.view === view) {
+          button.classList.remove("text-white/70", "ring-white/5");
+          button.classList.add("bg-white/20", "text-white", "shadow-xl", "ring-1", "ring-white/20");
+          button.setAttribute("aria-current", "page");
+
+          if (icon) {
+            icon.classList.remove(...iconBaseClasses);
+            icon.classList.add(...iconActiveBaseClasses, iconActiveMap[view] || "text-brand-red");
+          }
+
+          if (badge) {
+            badge.classList.remove("bg-white/10", "text-white/70");
+            badge.classList.add("bg-white/90", "text-brand-red", "shadow");
+          }
+        }
+      });
+    }
 
     async function initializeTracker() {
       const container = document.getElementById("content");
@@ -162,6 +215,7 @@
         renderMap(detectedHex);
       } else if (container) {
         container.innerHTML = createStatusCard("Keine ICAO Hex verfügbar.");
+        setActiveView("map");
       }
     }
 
@@ -229,48 +283,39 @@
         if (container) {
           container.innerHTML = createStatusCard("Bitte eine ICAO Hex eingeben.");
         }
+        setActiveView("map");
         return;
       }
 
       setCurrentHex(hex);
-      const overlayCard = `
-        <div class="pointer-events-none absolute inset-0 flex flex-col justify-between p-6">
-          <div class="flex justify-end">
-            <div class="pointer-events-none max-w-sm rounded-3xl bg-white/90 px-6 py-5 shadow-card ring-1 ring-white/40 backdrop-blur">
-              <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">Aktives Ziel</p>
-              <p class="mt-2 text-2xl font-semibold text-slate-900">${currentHex.toUpperCase()}</p>
-              <p class="mt-3 text-sm text-slate-500">Live-Tracking über ADS-B Exchange Globe.</p>
-            </div>
-          </div>
-          <div class="flex justify-between">
-            <div class="hidden gap-2 md:flex">
-              ${createIconPill("Wetter")}
-              ${createIconPill("Wind")}
-              ${createIconPill("Temp")}
-            </div>
-            <div class="pointer-events-none rounded-full bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-slate-500 shadow-card backdrop-blur">
-              Fokus: ${currentHex.toUpperCase()}
-            </div>
-          </div>
-        </div>`;
+      setActiveView("map");
 
       const container = document.getElementById("content");
-      if (container) {
-        container.innerHTML = `
-          <div class="relative h-[calc(100vh-8rem)] min-h-[28rem] overflow-hidden rounded-[2.5rem] bg-slate-200 shadow-card ring-1 ring-slate-200/70">
-            <iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}" class="absolute inset-0 h-full w-full border-0"></iframe>
-            <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-900/10 via-transparent to-slate-900/20"></div>
-            ${overlayCard}
-          </div>`;
-      }
-    }
+      if (!container) return;
 
-    function createIconPill(label) {
-      return `<span class="pointer-events-none inline-flex h-10 items-center justify-center rounded-full bg-white/80 px-4 text-xs font-semibold uppercase tracking-[0.35em] text-slate-500 shadow-card backdrop-blur">${escapeHtml(label)}</span>`;
+      const heading = currentHex ? currentHex.toUpperCase() : "—";
+
+      container.innerHTML = `
+        <div class="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 pb-8">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="space-y-1">
+              <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Live Map</p>
+              <h2 class="text-3xl font-semibold text-slate-900">ADS-B Exchange Globe</h2>
+              <p class="text-sm text-slate-500">Fokussiert auf ${heading}.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="rounded-full bg-brand-red/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-red">HEX ${heading}</span>
+            </div>
+          </div>
+          <div class="relative h-[calc(100vh-12rem)] min-h-[26rem] overflow-hidden rounded-[2.5rem] bg-slate-200 shadow-card ring-1 ring-slate-200/70">
+            <iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}" class="absolute inset-0 h-full w-full border-0" loading="lazy"></iframe>
+          </div>
+        </div>`;
     }
 
     function openMap(lat, lon) {
       stopSettingsInterval();
+      setActiveView("map");
       closeSidebar();
 
       const target = document.getElementById("content");
@@ -400,155 +445,263 @@
       closeSidebar();
     }
 
-    async function showEvents() {
-      stopSettingsInterval();
-      let html = '<div class="logs grid gap-6 p-2 sm:p-4 lg:grid-cols-2 xl:grid-cols-3">';
-
-      try {
-        const r = await fetch("/events");
-        if (!r.ok) {
-          throw new Error(`Serverantwort ${r.status}`);
-        }
-        const data = await r.json();
-        if (!Array.isArray(data) || data.length === 0) {
-          html += createEmptyCard("Keine Events gefunden");
-        } else {
-          data.forEach(ev => {
-            const typeRaw = typeof ev.type === "string" ? ev.type : "";
-            const type = typeRaw.toLowerCase();
-            const latNum = Number(ev.lat);
-            const lonNum = Number(ev.lon);
-            const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
-            const latParam = hasCoords ? latNum.toFixed(6) : "null";
-            const lonParam = hasCoords ? lonNum.toFixed(6) : "null";
-            const locationHtml = buildEventLocationHtml(type, ev.place);
-            const title = escapeHtml(typeRaw || '').toUpperCase();
-            const callsign = escapeHtml(ev.callsign || ev.hex || '—');
-            const details = `Alt ${escapeHtml(ev.alt || '—')} ft • Speed ${escapeHtml(ev.gs || '—')} kt`;
-            const coord = `${escapeHtml(ev.lat || '—')}, ${escapeHtml(ev.lon || '—')}`;
-            const time = escapeHtml(ev.time || '');
-
-            const cardContent = `
-              <div class="flex flex-col gap-5 text-left">
-                <div class="flex items-start justify-between gap-4">
-                  <div>
-                    <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">${title}</p>
-                    <h3 class="mt-2 text-xl font-semibold text-slate-900">${callsign}</h3>
-                    <p class="mt-3 text-sm font-medium text-slate-500">${details}</p>
-                  </div>
-                  <div class="hidden gap-2 sm:flex">
-                    ${createIconButton("Wetter")}
-                    ${createIconButton("Wind")}
-                    ${createIconButton("Temp")}
-                  </div>
-                </div>
-                <dl class="grid gap-4 text-sm text-slate-600 sm:grid-cols-2">
-                  <div>
-                    <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Ort</dt>
-                    <dd class="mt-2 font-medium text-slate-700">${locationHtml}</dd>
-                  </div>
-                  <div>
-                    <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Koordinaten</dt>
-                    <dd class="mt-2 font-medium text-slate-700">${coord}</dd>
-                  </div>
-                </dl>
-                <p class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">${time}</p>
-              </div>`;
-
-            if (hasCoords) {
-              const buttonClass = type === "landing" ? "landing-entry" : "takeoff-entry";
-              html += `<button type="button" class="log-entry ${buttonClass} event-entry group w-full rounded-3xl bg-white/90 p-6 text-left shadow-card ring-1 ring-white/40 backdrop-blur transition hover:-translate-y-1 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red" onclick="openMap(${latParam}, ${lonParam})">${cardContent}</button>`;
-            } else {
-              html += `<div class="log-entry rounded-3xl bg-white/90 p-6 shadow-card ring-1 ring-white/40 backdrop-blur">${cardContent}</div>`;
-            }
-          });
-        }
-      } catch (err) {
-        console.error("[Events] Fehler beim Laden der Events:", err);
-        const message = err && err.message ? err.message : String(err);
-        html += createEmptyCard(`Fehler beim Laden der Events (${escapeHtml(message)})`);
-      }
-
-      html += '</div>';
-      document.getElementById("content").innerHTML = html;
-      closeSidebar();
-    }
-
-    function createIconButton(label) {
-      return `<span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 shadow-sm shadow-slate-200/70">${escapeHtml(label.charAt(0))}</span>`;
-    }
 
     function createEmptyCard(message) {
       return `<div class="rounded-3xl bg-white/70 p-6 text-center text-sm font-medium text-slate-600 shadow-card backdrop-blur">${escapeHtml(message)}</div>`;
     }
 
+    async function showEvents() {
+      stopSettingsInterval();
+      setActiveView("events");
+      closeSidebar();
+
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      container.innerHTML = createStatusCard("Lade Events...");
+
+      try {
+        const response = await fetch("/events");
+        if (!response.ok) {
+          throw new Error(`Serverantwort ${response.status}`);
+        }
+
+        const data = await response.json();
+        const events = Array.isArray(data)
+          ? data.filter(item => {
+              const type = typeof item?.type === "string" ? item.type.toLowerCase() : "";
+              return type === "takeoff" || type === "landing";
+            })
+          : [];
+
+        if (events.length === 0) {
+          container.innerHTML = `
+            <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+              ${createEmptyCard("Noch keine Events erkannt")}
+            </div>`;
+          return;
+        }
+
+        const cards = events.map(event => {
+          const typeRaw = typeof event.type === "string" ? event.type : "";
+          const type = typeRaw.toLowerCase();
+          const isLanding = type === "landing";
+          const icon = isLanding ? "✈️↓" : "✈️↑";
+          const accentClass = isLanding ? "bg-emerald-500/10 text-emerald-600" : "bg-brand-red/10 text-brand-red";
+
+          const callsign = escapeHtml(event.callsign || event.hex || "—");
+          const altitude = escapeHtml(event.alt || "—");
+          const speed = escapeHtml(event.gs || "—");
+          const time = escapeHtml(event.time || "");
+
+          const latNum = Number(event.lat);
+          const lonNum = Number(event.lon);
+          const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+          const latFixed = hasCoords ? latNum.toFixed(6) : null;
+          const lonFixed = hasCoords ? lonNum.toFixed(6) : null;
+          const positionLabel = hasCoords
+            ? `${latFixed}°, ${lonFixed}°`
+            : `${escapeHtml(event.lat || "—")}, ${escapeHtml(event.lon || "—")}`;
+
+          const place = formatEventPlace(event.place);
+          const actionHint = hasCoords
+            ? '<div class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-brand-purple transition-all duration-300 ease-in-out group-hover:translate-x-1">Auf Karte anzeigen<span aria-hidden="true">→</span></div>'
+            : '<div class="mt-6 text-sm text-slate-400">Keine Koordinaten verfügbar</div>';
+
+          const attributes = hasCoords
+            ? `type="button" onclick="openMap(${latFixed}, ${lonFixed})"`
+            : 'type="button" disabled aria-disabled="true"';
+
+          return `
+            <button ${attributes} class="group relative w-full overflow-hidden rounded-3xl bg-white/90 p-6 text-left shadow-card ring-1 ring-white/40 backdrop-blur transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50 disabled:cursor-not-allowed disabled:opacity-60">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex items-center gap-4">
+                  <span class="flex h-12 w-12 items-center justify-center rounded-2xl ${accentClass} text-2xl transition-all duration-300 ease-in-out group-hover:scale-105">${icon}</span>
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">${escapeHtml(typeRaw || "Event")}</p>
+                    <h3 class="mt-1 text-xl font-semibold text-slate-900">${callsign}</h3>
+                  </div>
+                </div>
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">${time}</span>
+              </div>
+              <div class="mt-6 grid gap-4 text-sm text-slate-600 sm:grid-cols-2">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Altitude</p>
+                  <p class="mt-2 text-base font-semibold text-slate-800">${altitude} ft</p>
+                </div>
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Speed</p>
+                  <p class="mt-2 text-base font-semibold text-slate-800">${speed} kt</p>
+                </div>
+                <div class="sm:col-span-2">
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Position</p>
+                  <p class="mt-2 font-medium text-slate-700">${positionLabel}</p>
+                </div>
+                <div class="sm:col-span-2">
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Ort</p>
+                  <p class="mt-2 text-sm text-slate-500">${place}</p>
+                </div>
+              </div>
+              ${actionHint}
+            </button>`;
+        }).join("");
+
+        container.innerHTML = `
+          <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-8">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Events</p>
+                <h2 class="text-3xl font-semibold text-slate-900">Takeoff & Landing</h2>
+                <p class="text-sm text-slate-500">Klicke auf ein Event, um die Karte zu zentrieren.</p>
+              </div>
+              <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">Live Feed</span>
+            </div>
+            <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              ${cards}
+            </div>
+          </div>`;
+      } catch (err) {
+        console.error("[Events] Fehler beim Laden der Events:", err);
+        const message = err && err.message ? err.message : String(err);
+        container.innerHTML = `
+          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard(`Fehler beim Laden der Events (${escapeHtml(message)})`)}
+          </div>`;
+      }
+    }
+
+    function formatEventPlace(place) {
+      if (!place) {
+        return escapeHtml("—");
+      }
+
+      if (typeof place === "string") {
+        return escapeHtml(place);
+      }
+
+      if (typeof place === "object") {
+        const segments = [];
+        if (place.name) segments.push(String(place.name));
+        if (place.city) segments.push(String(place.city));
+        if (place.type) segments.push(String(place.type));
+        return escapeHtml(segments.join(" • ") || "—");
+      }
+
+      return escapeHtml(String(place));
+    }
+
     async function showLogs() {
       stopSettingsInterval();
-      let html = '<div class="logs grid gap-6 p-2 sm:p-4 lg:grid-cols-2 xl:grid-cols-3">';
+      setActiveView("logs");
+      closeSidebar();
+
+      const container = document.getElementById("content");
+      if (!container) return;
 
       if (!currentHex) {
-        html += createEmptyCard("Bitte eine ICAO Hex eingeben.");
-        html += '</div>';
-        document.getElementById("content").innerHTML = html;
-        closeSidebar();
+        container.innerHTML = `
+          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard("Bitte eine ICAO Hex eingeben.")}
+          </div>`;
         return;
       }
 
+      container.innerHTML = createStatusCard("Lade Logs...");
+
       try {
-        const r = await fetch(`/log?hex=${encodeURIComponent(currentHex)}`);
+        const response = await fetch(`/log?hex=${encodeURIComponent(currentHex)}`);
         let data = [];
-        if (r.status === 404) {
+        if (response.status === 404) {
           console.warn(`[Logs] Keine Log-Datei für ${currentHex} gefunden.`);
-        } else if (!r.ok) {
-          throw new Error(`Serverantwort ${r.status}`);
+        } else if (!response.ok) {
+          throw new Error(`Serverantwort ${response.status}`);
         } else {
-          data = await r.json();
+          data = await response.json();
         }
 
         if (!Array.isArray(data) || data.length === 0) {
-          html += createEmptyCard("Keine Daten gefunden");
-        } else {
-          data.slice(-200).forEach(d => {
-            const callsign = escapeHtml(d.callsign || d.hex || '—');
-            const altitude = escapeHtml(d.alt || '—');
-            const speed = escapeHtml(d.gs || '—');
-            const lat = escapeHtml(d.lat || '—');
-            const lon = escapeHtml(d.lon || '—');
-            const time = escapeHtml(d.time || '');
-
-            html += `<div class="log-entry rounded-3xl bg-white/90 p-6 shadow-card ring-1 ring-white/40 backdrop-blur transition hover:-translate-y-1 hover:shadow-2xl">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">TAKEOFF – ${callsign}</p>
-                  <p class="mt-3 text-sm font-medium text-slate-500">Alt ${altitude} ft • Speed ${speed} kt</p>
-                </div>
-                <div class="flex gap-2">
-                  ${createIconButton("W")}
-                  ${createIconButton("T")}
-                </div>
-              </div>
-              <dl class="mt-5 grid gap-4 text-sm text-slate-600 sm:grid-cols-2">
-                <div>
-                  <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Position</dt>
-                  <dd class="mt-2 font-medium text-slate-700">${lat}, ${lon}</dd>
-                </div>
-                <div>
-                  <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Hex</dt>
-                  <dd class="mt-2 font-medium text-slate-700">${currentHex.toUpperCase()}</dd>
-                </div>
-              </dl>
-              <p class="mt-6 text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">${time}</p>
+          container.innerHTML = `
+            <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+              ${createEmptyCard("Keine Daten gefunden")}
             </div>`;
-          });
+          return;
         }
+
+        const formatMetric = (value, suffix) => {
+          if (value === null || value === undefined) return "—";
+          const text = String(value).trim();
+          if (!text) return "—";
+          return `${escapeHtml(text)} ${suffix}`;
+        };
+
+        const rows = data.slice(-200).reverse().map(entry => {
+          const time = escapeHtml(entry.time || "");
+          const callsign = escapeHtml(entry.callsign || entry.hex || "—");
+          const hex = entry.hex ? escapeHtml(entry.hex) : "";
+          const altitude = formatMetric(entry.alt, "ft");
+          const speed = formatMetric(entry.gs, "kt");
+
+          const latNum = Number(entry.lat);
+          const lonNum = Number(entry.lon);
+          const position = Number.isFinite(latNum) && Number.isFinite(lonNum)
+            ? `${latNum.toFixed(4)}°, ${lonNum.toFixed(4)}°`
+            : `${escapeHtml(entry.lat || "—")}, ${escapeHtml(entry.lon || "—")}`;
+
+          const hexLine = hex ? `<div class="text-xs uppercase tracking-[0.3em] text-slate-400">${hex}</div>` : "";
+
+          return `
+            <tr class="divide-x divide-slate-100/80 transition-colors duration-200 ease-in-out hover:bg-slate-50/70">
+              <td class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">${time}</td>
+              <td class="px-4 py-3">
+                <div class="text-sm font-semibold text-slate-900">${callsign}</div>
+                ${hexLine}
+              </td>
+              <td class="px-4 py-3 text-sm font-medium text-slate-700">${altitude}</td>
+              <td class="px-4 py-3 text-sm font-medium text-slate-700">${speed}</td>
+              <td class="px-4 py-3 text-sm text-slate-600">
+                <div class="font-medium text-slate-700">${position}</div>
+                <div class="text-xs text-slate-400">Lat • Lon</div>
+              </td>
+            </tr>`;
+        }).join("");
+
+        container.innerHTML = `
+          <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-8">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Logs</p>
+                <h2 class="text-3xl font-semibold text-slate-900">Live Flugdaten</h2>
+                <p class="text-sm text-slate-500">Aktualisiert alle 3 Sekunden.</p>
+              </div>
+              <span class="rounded-full bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-600">HEX ${currentHex.toUpperCase()}</span>
+            </div>
+            <div class="rounded-3xl bg-white/90 shadow-card ring-1 ring-white/40 backdrop-blur">
+              <div class="max-h-[70vh] overflow-auto">
+                <table class="min-w-full table-fixed divide-y divide-slate-100 text-left">
+                  <thead class="sticky top-0 bg-white/95 backdrop-blur">
+                    <tr class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      <th scope="col" class="px-4 py-3">Zeit</th>
+                      <th scope="col" class="px-4 py-3">Callsign</th>
+                      <th scope="col" class="px-4 py-3">Alt</th>
+                      <th scope="col" class="px-4 py-3">Speed</th>
+                      <th scope="col" class="px-4 py-3">Position</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100/80 bg-white">
+                    ${rows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>`;
       } catch (err) {
         console.error("[Logs] Fehler beim Laden der Logs:", err);
-        html += createEmptyCard(`Fehler beim Laden der Logs (${escapeHtml(err.message)})`);
+        const message = err && err.message ? err.message : String(err);
+        container.innerHTML = `
+          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard(`Fehler beim Laden der Logs (${escapeHtml(message)})`)}
+          </div>`;
       }
-
-      html += '</div>';
-      document.getElementById("content").innerHTML = html;
-      closeSidebar();
     }
 
     async function applyHex() {
@@ -627,6 +780,7 @@
 
     async function showSettings() {
       stopSettingsInterval();
+      setActiveView("settings");
       closeSidebar();
 
       const container = document.getElementById("content");
@@ -665,7 +819,7 @@
           <p class="mt-2 text-sm text-slate-500">Wähle die aktuelle ICAO Hex für den Live-Feed.</p>
           <label for="hexInput" class="mt-5 block text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">ICAO Hex</label>
           <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
-          <button class="primary-button mt-4 inline-flex w-full items-center justify-center rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70" onclick="applyHex()">Flugzeug setzen</button>
+          <button class="primary-button mt-4 inline-flex w-full items-center justify-center rounded-full bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-xl transition-all duration-300 ease-in-out hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" onclick="applyHex()">Flugzeug setzen</button>
           <p id="hexStatus" class="mt-4 text-sm font-medium tracking-wide text-slate-500"></p>
         </div>
         <div class="settings-section rounded-3xl bg-white/90 px-6 py-6 shadow-card ring-1 ring-white/40 backdrop-blur">
