@@ -22,6 +22,15 @@ const configPath = path.join(__dirname, "config.json");
 let places = [];
 let lastEventId = 0;
 
+const ADSB_BASE_URL = "https://globe.adsbexchange.com/?icao=";
+const NAVIGATION_WAIT_UNTIL = "domcontentloaded";
+const NAVIGATION_TIMEOUT_MS = 60000;
+const PAGE_DEFAULT_TIMEOUT_MS = 60000;
+const PAGE_OPERATION_TIMEOUT_MS = 45000;
+const PUPPETEER_PROTOCOL_TIMEOUT_MS = 120000;
+const PAGE_OPERATION_TIMEOUT_CODE = "PAGE_OPERATION_TIMEOUT";
+let pageRecoveryInProgress = false;
+
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
@@ -544,6 +553,155 @@ function createSerialTaskQueue() {
 }
 
 const runWithPage = createSerialTaskQueue();
+
+function getTargetUrl(hexValue = targetHex) {
+  const fallback = typeof targetHex === "string" && targetHex.trim()
+    ? targetHex.trim().toLowerCase()
+    : "3e0fe9";
+  const candidate = typeof hexValue === "string" && hexValue.trim()
+    ? hexValue.trim().toLowerCase()
+    : fallback;
+  return `${ADSB_BASE_URL}${encodeURIComponent(candidate)}`;
+}
+
+function applyPageDefaults(pageInstance) {
+  if (!pageInstance) {
+    return;
+  }
+  if (typeof pageInstance.setDefaultTimeout === "function") {
+    pageInstance.setDefaultTimeout(PAGE_DEFAULT_TIMEOUT_MS);
+  }
+  if (typeof pageInstance.setDefaultNavigationTimeout === "function") {
+    pageInstance.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+  }
+}
+
+async function runPageOperation(operation, { timeoutMs = PAGE_OPERATION_TIMEOUT_MS } = {}) {
+  if (typeof operation !== "function") {
+    throw new TypeError("operation must be a function returning a promise");
+  }
+
+  const operationPromise = Promise.resolve().then(operation);
+
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return operationPromise;
+  }
+
+  let timeoutId;
+  let timedOut = false;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      const timeoutError = new Error(`Page operation timed out after ${timeoutMs} ms`);
+      timeoutError.code = PAGE_OPERATION_TIMEOUT_CODE;
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([operationPromise, timeoutPromise]);
+  } catch (err) {
+    if (timedOut) {
+      operationPromise.catch(innerErr => {
+        if (!innerErr) {
+          return;
+        }
+        const message = typeof innerErr.message === "string" ? innerErr.message : String(innerErr);
+        console.warn("⚠️ Seite meldete verspäteten Fehler:", message);
+      });
+    }
+    throw err;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function navigateToTarget({ hex = targetHex, waitUntil = NAVIGATION_WAIT_UNTIL, timeoutMs = NAVIGATION_TIMEOUT_MS } = {}) {
+  if (!page) {
+    throw new Error("Browserseite ist nicht initialisiert.");
+  }
+
+  const url = getTargetUrl(hex);
+  await page.goto(url, { waitUntil, timeout: timeoutMs });
+  return url;
+}
+
+function isTimeoutLikeError(err) {
+  if (!err) {
+    return false;
+  }
+
+  if (err.code === PAGE_OPERATION_TIMEOUT_CODE) {
+    return true;
+  }
+
+  if (puppeteer && puppeteer.errors && typeof puppeteer.errors.TimeoutError === "function" && err instanceof puppeteer.errors.TimeoutError) {
+    return true;
+  }
+
+  const message = typeof err.message === "string" ? err.message : "";
+  if (!message) {
+    return false;
+  }
+
+  return /timed?\s*out/i.test(message) || /protocolTimeout/i.test(message);
+}
+
+async function rebuildPage(reason = "timeout") {
+  if (!browser) {
+    console.warn("⚠️ Kein Browser verfügbar, starte Browser neu...");
+    await startBrowser();
+    if (!browser) {
+      throw new Error("Browser konnte nicht neu gestartet werden.");
+    }
+    return;
+  }
+
+  await runWithPage(async () => {
+    const previousPage = page;
+    page = null;
+
+    if (previousPage) {
+      try {
+        await previousPage.close({ runBeforeUnload: true });
+      } catch (err) {
+        console.warn("⚠️ Alte Browserseite konnte nicht geschlossen werden:", err.message);
+      }
+    }
+
+    const newPage = await browser.newPage();
+    applyPageDefaults(newPage);
+    page = newPage;
+
+    await navigateToTarget();
+  });
+
+  console.log(`🔄 Browserseite neu initialisiert (${reason}):`, targetHex);
+
+  if (scrapeLoopActive) {
+    scheduleNextScrape(0);
+  }
+}
+
+async function attemptPageRecovery(reason = "timeout") {
+  if (pageRecoveryInProgress) {
+    return;
+  }
+
+  pageRecoveryInProgress = true;
+  try {
+    await rebuildPage(reason);
+  } catch (err) {
+    const message = typeof err?.message === "string" ? err.message : String(err);
+    console.error("❌ Wiederherstellung der Seite fehlgeschlagen:", message);
+  } finally {
+    pageRecoveryInProgress = false;
+  }
+}
+
 const SCRAPE_INTERVAL_MS = 3000;
 let scrapeTimer = null;
 let scrapeLoopActive = false;
@@ -873,7 +1031,7 @@ async function detectEventByLastSeen(record) {
 async function scrapeOnce() {
   if (!page) return;
 
-  const data = await page.evaluate(() => {
+  const data = await runPageOperation(() => page.evaluate(() => {
     const get = (sel) => document.querySelector(sel)?.textContent.trim() || null;
     const hexRaw = get("#selected_icao") || "";
     const hex = hexRaw.replace(/Hex:\s*/i, "").split(/\s+/)[0] || null;
@@ -893,7 +1051,7 @@ async function scrapeOnce() {
       hdg: get("#selected_track1"),
       lastSeen // ggf. anderer Selektor
     };
-  });
+  }));
 
   if (!data.hex) return;
 
@@ -939,7 +1097,11 @@ async function runScrapeCycle() {
   try {
     await runWithPage(() => scrapeOnce());
   } catch (err) {
-    console.error("❌ Scrape-Fehler:", err.message);
+    const message = typeof err?.message === "string" ? err.message : String(err);
+    console.error("❌ Scrape-Fehler:", message);
+    if (isTimeoutLikeError(err)) {
+      await attemptPageRecovery("scrape-timeout");
+    }
   } finally {
     if (scrapeLoopActive) {
       scheduleNextScrape();
@@ -1166,7 +1328,8 @@ async function startBrowser() {
     const executablePath = await resolveChromiumExecutable();
     const launchOptions = {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      protocolTimeout: PUPPETEER_PROTOCOL_TIMEOUT_MS
     };
 
     if (executablePath) {
@@ -1174,10 +1337,19 @@ async function startBrowser() {
     }
 
     browser = await puppeteer.launch(launchOptions);
+    browser.on("disconnected", () => {
+      console.error("⚠️ Browserverbindung verloren. Starte Neuinitialisierung...");
+      browser = null;
+      page = null;
+      void attemptPageRecovery("browser-disconnected");
+    });
+
     page = await browser.newPage();
-    await runWithPage(() => page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" }));
+    applyPageDefaults(page);
+    await runWithPage(() => navigateToTarget());
     console.log("🌍 Globe geladen für:", targetHex);
 
+    stopScrapeLoop();
     startScrapeLoop();
   } catch (err) {
     console.error("❌ Browserstart fehlgeschlagen:", err.message);
@@ -1283,7 +1455,7 @@ async function handleSetRequest(res, hexParam) {
   }
 
   try {
-    await runWithPage(() => page.goto(`https://globe.adsbexchange.com/?icao=${targetHex}`, { waitUntil: "domcontentloaded" }));
+    await runWithPage(() => navigateToTarget({ hex: targetHex }));
     if (scrapeLoopActive) {
       scheduleNextScrape(0);
     } else {
@@ -1300,6 +1472,9 @@ async function handleSetRequest(res, hexParam) {
     sendJSON(res, 200, responsePayload);
   } catch (err) {
     console.error("❌ Navigation zum neuen Ziel fehlgeschlagen:", err.message);
+    if (isTimeoutLikeError(err)) {
+      await attemptPageRecovery("navigation-timeout");
+    }
     sendError(res, 500, "Navigation fehlgeschlagen.");
   }
 }
