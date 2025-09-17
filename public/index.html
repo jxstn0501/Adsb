@@ -145,16 +145,21 @@
   ></div>
 
   <script>
+    const HEX_HISTORY_STORAGE_KEY = "heliTrackerHexHistory";
+    let hexHistory = loadHexHistory();
     let currentHex = "";
     let settingsInterval = null;
     let currentConfigCache = null;
     let currentPlaces = [];
+    let currentEvents = [];
     let editingPlaceId = null;
     let nominatimResults = [];
     let nominatimSelectedIndex = null;
     let nominatimSearchToken = 0;
     let activeView = "map";
     let activeEventMap = null;
+    let cachedLogOverview = [];
+    let activeLogHex = null;
     const iconBaseClasses = ["bg-white/10", "text-white/80", "shadow-inner", "ring-1", "ring-white/10"];
     const iconActiveBaseClasses = ["bg-white", "shadow-lg", "ring-2", "ring-white/80"];
     const iconActiveTextClasses = ["text-brand-red", "text-brand-purple", "text-sky-600", "text-emerald-600"];
@@ -756,108 +761,242 @@
       setActiveView("logs");
       closeSidebar();
       cleanupEventMap();
+      activeLogHex = null;
 
+      await loadLogOverview();
+    }
+
+    async function loadLogOverview() {
       const container = document.getElementById("content");
       if (!container) return;
-
-      if (!currentHex) {
-        container.innerHTML = `
-          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
-            ${createEmptyCard("Bitte eine ICAO Hex eingeben.")}
-          </div>`;
-        return;
-      }
 
       container.innerHTML = createStatusCard("Lade Logs...");
 
       try {
-        const response = await fetch(`/log?hex=${encodeURIComponent(currentHex)}`);
-        let data = [];
-        if (response.status === 404) {
-          console.warn(`[Logs] Keine Log-Datei für ${currentHex} gefunden.`);
-        } else if (!response.ok) {
+        const response = await fetch("/log");
+        if (!response.ok) {
           throw new Error(`Serverantwort ${response.status}`);
-        } else {
-          data = await response.json();
         }
 
-        if (!Array.isArray(data) || data.length === 0) {
-          container.innerHTML = `
-            <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
-              ${createEmptyCard("Keine Daten gefunden")}
-            </div>`;
-          return;
-        }
-
-        const rows = data.slice(-200).reverse().map(entry => {
-          const time = escapeHtml(formatDateTime(entry.time));
-          const callsign = escapeHtml(entry.callsign || entry.hex || "—");
-          const hex = entry.hex ? escapeHtml(entry.hex) : "";
-          const altitude = escapeHtml(formatMetricValue(entry.alt, "ft"));
-          const speed = escapeHtml(formatMetricValue(entry.gs, "kt"));
-
-          const latNum = Number(entry.lat);
-          const lonNum = Number(entry.lon);
-          const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
-          const position = hasCoords
-            ? `${latNum.toFixed(4)}°, ${lonNum.toFixed(4)}°`
-            : `${entry.lat ?? "—"}, ${entry.lon ?? "—"}`;
-          const safePosition = escapeHtml(position);
-
-          const hexLine = hex ? `<div class="text-xs uppercase tracking-[0.3em] text-slate-400">${hex}</div>` : "";
-
-          return `
-            <tr class="divide-x divide-slate-100/80 transition-colors duration-200 ease-in-out hover:bg-slate-50/70">
-              <td class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">${time}</td>
-              <td class="px-4 py-3">
-                <div class="text-sm font-semibold text-slate-900">${callsign}</div>
-                ${hexLine}
-              </td>
-              <td class="px-4 py-3 text-sm font-medium text-slate-700">${altitude}</td>
-              <td class="px-4 py-3 text-sm font-medium text-slate-700">${speed}</td>
-              <td class="px-4 py-3 text-sm text-slate-600">
-                <div class="font-medium text-slate-700">${safePosition}</div>
-                <div class="text-xs text-slate-400">Lat • Lon</div>
-              </td>
-            </tr>`;
-        }).join("");
-
-        container.innerHTML = `
-          <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-8">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Logs</p>
-                <h2 class="text-3xl font-semibold text-slate-900">Live Flugdaten</h2>
-                <p class="text-sm text-slate-500">Aktualisiert alle 3 Sekunden.</p>
-              </div>
-              <span class="rounded-full bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-600">HEX ${currentHex.toUpperCase()}</span>
-            </div>
-            <div class="rounded-3xl bg-white/90 shadow-card ring-1 ring-white/40 backdrop-blur">
-              <div class="max-h-[70vh] overflow-x-auto overflow-y-auto">
-                <table class="min-w-full table-fixed divide-y divide-slate-100 text-left">
-                  <thead class="sticky top-0 bg-white/95 backdrop-blur">
-                    <tr class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                      <th scope="col" class="px-4 py-3">Zeit</th>
-                      <th scope="col" class="px-4 py-3">Callsign</th>
-                      <th scope="col" class="px-4 py-3">Alt</th>
-                      <th scope="col" class="px-4 py-3">Speed</th>
-                      <th scope="col" class="px-4 py-3">Position</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-100/80 bg-white">
-                    ${rows}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>`;
+        const list = await response.json();
+        const normalized = Array.isArray(list) ? list : [];
+        cachedLogOverview = normalized;
+        renderLogOverview(normalized);
       } catch (err) {
-        console.error("[Logs] Fehler beim Laden der Logs:", err);
+        console.error("[Logs] Übersicht konnte nicht geladen werden:", err);
         const message = err && err.message ? err.message : String(err);
         container.innerHTML = `
           <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
             ${createEmptyCard(`Fehler beim Laden der Logs (${escapeHtml(message)})`)}
           </div>`;
+      }
+    }
+
+    function renderLogOverview(list) {
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      if (!Array.isArray(list) || list.length === 0) {
+        container.innerHTML = `
+          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard("Keine Logs vorhanden")}
+          </div>`;
+        return;
+      }
+
+      const cards = list.map(entry => {
+        if (!entry) return "";
+        const hex = entry.hex ? String(entry.hex).toLowerCase() : "";
+        const hexLabel = hex ? hex.toUpperCase() : "—";
+        const last = entry.last && typeof entry.last === "object" ? entry.last : {};
+        const callsign = escapeHtml(last.callsign || "—");
+        const time = escapeHtml(formatDateTime(last.time));
+        const altitude = escapeHtml(formatMetricValue(last.alt, "ft"));
+        const speed = escapeHtml(formatMetricValue(last.gs, "kt"));
+        const count = Number(entry.count) || 0;
+        const countLabel = count === 1 ? "1 Eintrag" : `${count} Einträge`;
+
+        const buttonDisabled = !hex;
+        const attributes = buttonDisabled
+          ? "type=\"button\" disabled"
+          : `type=\"button\" onclick=\"openLogDetail('${escapeHtml(hex)}')\"`;
+
+        return `
+          <button ${attributes} class="group relative flex w-full flex-col gap-3 rounded-3xl bg-white/90 p-5 text-left shadow-card ring-1 ring-white/40 backdrop-blur transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-60">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">HEX ${escapeHtml(hexLabel)}</p>
+                <h3 class="mt-1 text-xl font-semibold text-slate-900">${callsign}</h3>
+                <p class="text-xs text-slate-400">${escapeHtml(countLabel)}</p>
+              </div>
+              <span class="rounded-full bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-600">${time}</span>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Altitude</p>
+                <p class="mt-1 text-sm font-medium text-slate-700">${altitude}</p>
+              </div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Speed</p>
+                <p class="mt-1 text-sm font-medium text-slate-700">${speed}</p>
+              </div>
+            </div>
+            <div class="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-sky-600 transition group-hover:translate-x-1">
+              Log anzeigen<span aria-hidden="true">→</span>
+            </div>
+          </button>`;
+      }).join("");
+
+      container.innerHTML = `
+        <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-8">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Logs</p>
+              <h2 class="text-3xl font-semibold text-slate-900">Flugzeuge</h2>
+              <p class="text-sm text-slate-500">Wähle ein Flugzeug, um den vollständigen Log zu sehen.</p>
+            </div>
+            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-500/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300" onclick="loadLogOverview()">
+              Aktualisieren
+            </button>
+          </div>
+          <div class="grid gap-4 lg:grid-cols-2">
+            ${cards}
+          </div>
+        </div>`;
+    }
+
+    async function openLogDetail(hex) {
+      const targetHex = typeof hex === "string" ? hex.trim().toLowerCase() : "";
+      if (!targetHex) {
+        return;
+      }
+
+      activeLogHex = targetHex;
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      container.innerHTML = createStatusCard("Lade Log...");
+
+      try {
+        const response = await fetch(`/log?hex=${encodeURIComponent(targetHex)}`);
+        if (response.status === 404) {
+          renderLogDetail(targetHex, []);
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(`Serverantwort ${response.status}`);
+        }
+        const data = await response.json();
+        renderLogDetail(targetHex, Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error("[Logs] Detailansicht konnte nicht geladen werden:", err);
+        const container = document.getElementById("content");
+        if (!container) return;
+        const message = err && err.message ? err.message : String(err);
+        container.innerHTML = `
+          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard(`Fehler beim Laden des Logs (${escapeHtml(message)})`)}
+            <div class="flex justify-center">
+              <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-500/90" onclick="returnToLogOverview()">Zurück</button>
+            </div>
+          </div>`;
+      }
+    }
+
+    function renderLogDetail(hex, data) {
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      if (!Array.isArray(data) || data.length === 0) {
+        container.innerHTML = `
+          <div class="mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard("Keine Log-Einträge vorhanden")}
+            <div class="flex justify-center">
+              <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-500/90" onclick="returnToLogOverview()">Zurück</button>
+            </div>
+          </div>`;
+        return;
+      }
+
+      const limited = data.slice(-200).reverse();
+      const rows = limited.map(entry => {
+        const time = escapeHtml(formatDateTime(entry.time));
+        const callsign = escapeHtml(entry.callsign || entry.hex || "—");
+        const altitude = escapeHtml(formatMetricValue(entry.alt, "ft"));
+        const speed = escapeHtml(formatMetricValue(entry.gs, "kt"));
+
+        const latNum = Number(entry.lat);
+        const lonNum = Number(entry.lon);
+        const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+        const position = hasCoords
+          ? `${latNum.toFixed(4)}°, ${lonNum.toFixed(4)}°`
+          : `${entry.lat ?? "—"}, ${entry.lon ?? "—"}`;
+        const safePosition = escapeHtml(position);
+
+        return `
+          <tr class="divide-x divide-slate-100/80">
+            <td class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">${time}</td>
+            <td class="px-4 py-3">
+              <div class="text-sm font-semibold text-slate-900">${callsign}</div>
+              <div class="text-xs uppercase tracking-[0.3em] text-slate-400">${escapeHtml(entry.hex || "")}</div>
+            </td>
+            <td class="px-4 py-3 text-sm font-medium text-slate-700">${altitude}</td>
+            <td class="px-4 py-3 text-sm font-medium text-slate-700">${speed}</td>
+            <td class="px-4 py-3 text-sm text-slate-600">
+              <div class="font-medium text-slate-700">${safePosition}</div>
+              <div class="text-xs text-slate-400">Lat • Lon</div>
+            </td>
+          </tr>`;
+      }).join("");
+
+      const overviewEntry = cachedLogOverview.find(item => item && String(item.hex).toLowerCase() === hex);
+      const callsign = overviewEntry && overviewEntry.last ? overviewEntry.last.callsign : (data[data.length - 1]?.callsign ?? "—");
+      const headingHex = hex ? hex.toUpperCase() : "—";
+
+      container.innerHTML = `
+        <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-8">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="returnToLogOverview()" class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200/60 bg-white/70 text-slate-600 shadow-sm transition hover:bg-white" aria-label="Zurück zur Übersicht">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+              </button>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Log</p>
+                <h2 class="text-3xl font-semibold text-slate-900">${escapeHtml(callsign || "Flugzeug")}</h2>
+                <p class="text-sm text-slate-500">HEX ${escapeHtml(headingHex)}</p>
+              </div>
+            </div>
+            <span class="rounded-full bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-600">${escapeHtml(formatDateTime(limited[0]?.time))}</span>
+          </div>
+          <div class="rounded-3xl bg-white/90 shadow-card ring-1 ring-white/40 backdrop-blur">
+            <div class="max-h-[70vh] overflow-x-auto overflow-y-auto">
+              <table class="min-w-full table-fixed divide-y divide-slate-100 text-left">
+                <thead class="sticky top-0 bg-white/95 backdrop-blur">
+                  <tr class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    <th scope="col" class="px-4 py-3">Zeit</th>
+                    <th scope="col" class="px-4 py-3">Callsign</th>
+                    <th scope="col" class="px-4 py-3">Alt</th>
+                    <th scope="col" class="px-4 py-3">Speed</th>
+                    <th scope="col" class="px-4 py-3">Position</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100/80 bg-white">
+                  ${rows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function returnToLogOverview() {
+      activeLogHex = null;
+      if (Array.isArray(cachedLogOverview) && cachedLogOverview.length > 0) {
+        renderLogOverview(cachedLogOverview);
+      } else {
+        void loadLogOverview();
       }
     }
 
@@ -892,7 +1031,11 @@
         }
 
         setCurrentHex(hex);
-        await updateLatest();
+        const latest = await updateLatest();
+        const storedCallsign = (payload && payload.callsign)
+          || (latest && latest.callsign)
+          || "";
+        storeHexHistoryEntry(hex, storedCallsign);
 
         const defaultMessage = `Neues Ziel gesetzt: ${hex}`;
         const responseMessage = payload && typeof payload === "object"
@@ -914,8 +1057,9 @@
           throw new Error(`Serverantwort ${res.status}`);
         }
         const d = await res.json();
-        if (!d || !d.time) return;
-        const row = `<tr class="divide-x divide-slate-100/60">
+        const body = document.getElementById("latestBody");
+        if (d && d.time) {
+          const row = `<tr class="divide-x divide-slate-100/60">
         <td class="px-3 py-2 text-sm font-medium text-slate-700">${escapeHtml(formatDateTime(d.time))}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.callsign)}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.hex)}</td>
@@ -928,10 +1072,14 @@
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.vr)}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.hdg)}</td>
       </tr>`;
-        const body = document.getElementById("latestBody");
-        if (body) body.innerHTML = row;
+          if (body) body.innerHTML = row;
+        } else if (body) {
+          body.innerHTML = "";
+        }
+        return d;
       } catch (err) {
         console.warn("[Latest] Aktualisierung fehlgeschlagen:", err);
+        return null;
       }
     }
 
@@ -947,16 +1095,18 @@
       }
 
       try {
-        const [configData, placesData] = await Promise.all([
+        const [configData, placesData, eventsData] = await Promise.all([
           fetchConfig(),
-          fetchPlaces()
+          fetchPlaces(),
+          fetchEventsList()
         ]);
         currentConfigCache = configData;
         currentPlaces = Array.isArray(placesData) ? placesData : [];
+        currentEvents = Array.isArray(eventsData) ? eventsData : [];
         editingPlaceId = null;
-        renderSettingsView(currentConfigCache, currentPlaces);
-        updateLatest();
-        settingsInterval = setInterval(updateLatest, 3000);
+        renderSettingsView(currentConfigCache, currentPlaces, currentEvents);
+        void updateLatest();
+        settingsInterval = setInterval(() => { void updateLatest(); }, 3000);
       } catch (err) {
         console.error("[Settings] Fehler beim Laden:", err);
         if (container) {
@@ -966,7 +1116,7 @@
       }
     }
 
-    function renderSettingsView(config, places) {
+    function renderSettingsView(config, places, events = []) {
       const container = document.getElementById("content");
       if (!container) return;
 
@@ -977,6 +1127,13 @@
           <p class="mt-2 text-sm text-slate-500">Wähle die aktuelle ICAO Hex für den Live-Feed.</p>
           <label for="hexInput" class="mt-5 block text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">ICAO Hex</label>
           <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
+          <div id="hexHistoryWrapper" class="mt-4 hidden">
+            <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="hexHistorySelect">Gespeicherte Hex</label>
+            <div class="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <select id="hexHistorySelect" class="flex-1 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" onchange="handleHexHistorySelection(event)"></select>
+              <button type="button" class="inline-flex items-center justify-center rounded-full border border-brand-red/30 bg-white/70 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red shadow-inner shadow-white/40 transition hover:bg-white" onclick="clearHexHistory()">Liste löschen</button>
+            </div>
+          </div>
           <button class="primary-button mt-4 inline-flex w-full items-center justify-center rounded-full bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-xl transition-all duration-300 ease-in-out hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" onclick="applyHex()">Flugzeug setzen</button>
           <p id="hexStatus" class="mt-4 text-sm font-medium tracking-wide text-slate-500"></p>
         </div>
@@ -1081,6 +1238,33 @@
             </div>
           </div>
         </div>
+        <div class="settings-section rounded-3xl bg-white/90 px-6 py-6 shadow-card ring-1 ring-white/40 backdrop-blur">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 class="text-xl font-semibold text-slate-900">Events verwalten</h3>
+              <p class="mt-1 text-sm text-slate-500">Lösche erkannte Takeoff- und Landing-Events.</p>
+            </div>
+            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70" onclick="refreshEventsForSettings()">
+              Aktualisieren
+            </button>
+          </div>
+          <div class="mt-6 overflow-hidden rounded-2xl border border-slate-100/80">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-xs uppercase tracking-[0.3em] text-slate-400">
+              <thead class="bg-slate-50/60">
+                <tr>
+                  <th class="px-3 py-3 font-semibold">Zeit</th>
+                  <th class="px-3 py-3 font-semibold">Typ</th>
+                  <th class="px-3 py-3 font-semibold">Callsign</th>
+                  <th class="px-3 py-3 font-semibold">Ort</th>
+                  <th class="px-3 py-3 font-semibold">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody" class="divide-y divide-slate-100/80 bg-white/70"></tbody>
+            </table>
+          </div>
+          <p id="eventsEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Events vorhanden.</p>
+          <p id="eventsMessage" class="settings-message mt-4 text-sm font-medium tracking-wide text-slate-500"></p>
+        </div>
       </div>`;
 
       container.innerHTML = html;
@@ -1094,6 +1278,8 @@
 
       renderPlacesTable(places);
       updatePlaceFormState();
+      renderHexHistoryDropdown();
+      renderEventsTable(events);
     }
 
     async function fetchConfig() {
@@ -1114,6 +1300,15 @@
 
     async function fetchPlaces() {
       const res = await fetch("/places");
+      if (!res.ok) {
+        throw new Error(`Serverantwort ${res.status}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    }
+
+    async function fetchEventsList() {
+      const res = await fetch("/events");
       if (!res.ok) {
         throw new Error(`Serverantwort ${res.status}`);
       }
@@ -1157,6 +1352,108 @@
 
       body.innerHTML = rows;
       empty.classList.add("hidden");
+    }
+
+    function renderEventsTable(list) {
+      const body = document.getElementById("eventsTableBody");
+      const empty = document.getElementById("eventsEmpty");
+      if (!body || !empty) return;
+
+      if (!Array.isArray(list) || list.length === 0) {
+        body.innerHTML = "";
+        empty.classList.remove("hidden");
+        return;
+      }
+
+      const sorted = [...list].sort((a, b) => {
+        const timeA = Date.parse(a && a.time ? a.time : 0);
+        const timeB = Date.parse(b && b.time ? b.time : 0);
+        const invalidA = Number.isNaN(timeA);
+        const invalidB = Number.isNaN(timeB);
+        if (invalidA && invalidB) return 0;
+        if (invalidA) return 1;
+        if (invalidB) return -1;
+        return timeB - timeA;
+      });
+
+      const rows = sorted.map(event => {
+        if (!event) return "";
+        const eventId = event.id !== undefined && event.id !== null ? String(event.id) : "";
+        const time = escapeHtml(formatDateTime(event.time));
+        const typeRaw = typeof event.type === "string" ? event.type : "";
+        const typeLabel = typeRaw ? typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1) : "Event";
+        const callsign = escapeHtml(event.callsign || event.hex || "—");
+        const placeLabel = formatEventPlace(event.place, event.type);
+        const action = eventId
+          ? `<button type="button" class="rounded-full bg-rose-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-rose-600 transition hover:bg-rose-200" onclick="deleteEventById('${escapeHtml(eventId)}')">Löschen</button>`
+          : `<span class="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Nicht verfügbar</span>`;
+
+        return `<tr>
+          <td class="px-3 py-3 text-sm font-medium text-slate-700">${time}</td>
+          <td class="px-3 py-3 text-sm text-slate-600">${escapeHtml(typeLabel)}</td>
+          <td class="px-3 py-3 text-sm text-slate-600">${callsign}</td>
+          <td class="px-3 py-3 text-sm text-slate-600">${placeLabel}</td>
+          <td class="px-3 py-3">${action}</td>
+        </tr>`;
+      }).join("");
+
+      body.innerHTML = rows;
+      empty.classList.add("hidden");
+    }
+
+    function showEventsSettingsMessage(message, type = "") {
+      const el = document.getElementById("eventsMessage");
+      if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `settings-message mt-4 text-sm font-medium tracking-wide ${color}`;
+      el.textContent = message || "";
+    }
+
+    async function refreshEventsForSettings(showStatus = true) {
+      try {
+        const list = await fetchEventsList();
+        currentEvents = Array.isArray(list) ? list : [];
+        renderEventsTable(currentEvents);
+        if (showStatus) {
+          showEventsSettingsMessage("Events aktualisiert.", "success");
+        } else {
+          showEventsSettingsMessage("", "");
+        }
+      } catch (err) {
+        console.error("[Events] Aktualisierung fehlgeschlagen:", err);
+        const message = err && err.message ? err.message : String(err);
+        showEventsSettingsMessage(`Fehler beim Aktualisieren der Events: ${escapeHtml(message)}`, "error");
+      }
+    }
+
+    async function deleteEventById(id) {
+      const targetId = id !== undefined && id !== null ? String(id) : "";
+      if (!targetId) {
+        showEventsSettingsMessage("Ungültige Event-ID.", "error");
+        return;
+      }
+
+      const confirmed = window.confirm("Dieses Event wirklich löschen?");
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`/events/${encodeURIComponent(targetId)}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data && data.error ? data.error : `Serverantwort ${res.status}`);
+        }
+        await refreshEventsForSettings(false);
+        showEventsSettingsMessage("Event gelöscht.", "success");
+      } catch (err) {
+        console.error("[Events] Löschen fehlgeschlagen:", err);
+        const message = err && err.message ? err.message : String(err);
+        showEventsSettingsMessage(`Fehler beim Löschen: ${escapeHtml(message)}`, "error");
+      }
     }
 
     function updatePlaceFormState() {
@@ -1330,6 +1627,7 @@
         resetPlaceFormValues();
         updatePlaceFormState();
         await refreshPlaces();
+        await refreshEventsForSettings(false);
       } catch (err) {
         console.error("[Places] Speichern fehlgeschlagen:", err);
         showPlaceMessage(`Fehler beim Speichern: ${err.message}`, "error");
@@ -1562,6 +1860,126 @@
       }
       el.className = `settings-message mt-4 text-sm font-medium tracking-wide ${color}`;
       el.textContent = message || "";
+    }
+
+    function loadHexHistory() {
+      try {
+        const raw = localStorage.getItem(HEX_HISTORY_STORAGE_KEY);
+        if (!raw) {
+          return [];
+        }
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          return [];
+        }
+        return parsed
+          .map(entry => {
+            if (!entry || typeof entry.hex !== "string") {
+              return null;
+            }
+            const normalizedHex = entry.hex.trim().toLowerCase();
+            if (!normalizedHex) {
+              return null;
+            }
+            const callsign = typeof entry.callsign === "string" ? entry.callsign.trim() : "";
+            const lastUsed = typeof entry.lastUsed === "string" ? entry.lastUsed : null;
+            return { hex: normalizedHex, callsign, lastUsed };
+          })
+          .filter(Boolean);
+      } catch (err) {
+        console.warn("[HexHistory] Laden fehlgeschlagen:", err);
+        return [];
+      }
+    }
+
+    function saveHexHistory(list) {
+      try {
+        if (!Array.isArray(list) || list.length === 0) {
+          localStorage.removeItem(HEX_HISTORY_STORAGE_KEY);
+        } else {
+          localStorage.setItem(HEX_HISTORY_STORAGE_KEY, JSON.stringify(list));
+        }
+      } catch (err) {
+        console.warn("[HexHistory] Speichern fehlgeschlagen:", err);
+      }
+    }
+
+    function renderHexHistoryDropdown() {
+      const wrapper = document.getElementById("hexHistoryWrapper");
+      const select = document.getElementById("hexHistorySelect");
+      if (!wrapper || !select) return;
+
+      if (!Array.isArray(hexHistory) || hexHistory.length === 0) {
+        wrapper.classList.add("hidden");
+        select.innerHTML = "";
+        return;
+      }
+
+      wrapper.classList.remove("hidden");
+      const options = hexHistory.map(entry => {
+        if (!entry || !entry.hex) return "";
+        const labelParts = [];
+        if (entry.callsign) {
+          labelParts.push(entry.callsign);
+        }
+        labelParts.push(entry.hex.toUpperCase());
+        const label = labelParts.join(" • ");
+        return `<option value="${escapeHtml(entry.hex)}">${escapeHtml(label)}</option>`;
+      }).join("");
+      select.innerHTML = `<option value="">Gespeicherten Hex wählen</option>${options}`;
+      select.value = "";
+    }
+
+    function handleHexHistorySelection(event) {
+      const value = event && event.target ? event.target.value : "";
+      if (!value) {
+        return;
+      }
+      const input = document.getElementById("hexInput");
+      if (input) {
+        input.value = value;
+      }
+      const entry = Array.isArray(hexHistory)
+        ? hexHistory.find(item => item && item.hex === value.toLowerCase())
+        : null;
+      if (entry && entry.callsign) {
+        setHexStatus(`${entry.callsign} (${value.toUpperCase()}) übernommen.`, "");
+      } else {
+        setHexStatus(`Hex ${value.toUpperCase()} übernommen.`, "");
+      }
+      if (event && event.target) {
+        event.target.value = "";
+      }
+    }
+
+    function clearHexHistory() {
+      const confirmed = window.confirm("Gespeicherte Hex-Liste löschen?");
+      if (!confirmed) return;
+      hexHistory = [];
+      saveHexHistory(hexHistory);
+      renderHexHistoryDropdown();
+      setHexStatus("Gespeicherte Hexe gelöscht.", "success");
+    }
+
+    function storeHexHistoryEntry(hex, callsign = "") {
+      if (!hex) return;
+      const normalizedHex = String(hex).trim().toLowerCase();
+      if (!normalizedHex) return;
+      const normalizedCallsign = typeof callsign === "string" ? callsign.trim() : "";
+      const timestamp = new Date().toISOString();
+
+      if (!Array.isArray(hexHistory)) {
+        hexHistory = [];
+      }
+
+      hexHistory = hexHistory.filter(entry => entry && entry.hex !== normalizedHex);
+      hexHistory.unshift({ hex: normalizedHex, callsign: normalizedCallsign, lastUsed: timestamp });
+      if (hexHistory.length > 20) {
+        hexHistory = hexHistory.slice(0, 20);
+      }
+
+      saveHexHistory(hexHistory);
+      renderHexHistoryDropdown();
     }
 
     function createStatusCard(message) {

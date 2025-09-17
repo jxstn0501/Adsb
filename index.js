@@ -16,9 +16,11 @@ let flightStatus = {};    // Status- & Verlaufdaten pro Flugzeug
 const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
 const logCounts = {};     // Zeilenanzahl pro Hex-Datei
+const lastLogRecords = {}; // Letzter Log-Eintrag pro Hex
 const placesPath = path.join(__dirname, "places.json");
 const configPath = path.join(__dirname, "config.json");
 let places = [];
+let lastEventId = 0;
 
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
@@ -194,6 +196,142 @@ function generatePlaceId() {
   return Date.now().toString(36);
 }
 
+function generateEventId() {
+  lastEventId += 1;
+  return String(lastEventId);
+}
+
+function normalizeEventPlace(placeInfo) {
+  if (placeInfo === null || placeInfo === undefined) {
+    return null;
+  }
+
+  if (typeof placeInfo !== "object") {
+    return placeInfo;
+  }
+
+  const snapshot = {};
+
+  if (placeInfo.id !== undefined && placeInfo.id !== null) {
+    snapshot.id = String(placeInfo.id);
+  }
+
+  if (placeInfo.name !== undefined) {
+    snapshot.name = placeInfo.name;
+  }
+
+  if (placeInfo.type !== undefined) {
+    snapshot.type = placeInfo.type;
+  }
+
+  const lat = toFiniteNumber(placeInfo.lat);
+  if (lat !== null) {
+    snapshot.lat = lat;
+  }
+
+  const lon = toFiniteNumber(placeInfo.lon);
+  if (lon !== null) {
+    snapshot.lon = lon;
+  }
+
+  if (placeInfo.city !== undefined) {
+    snapshot.city = placeInfo.city;
+  }
+
+  return snapshot;
+}
+
+async function persistEvents() {
+  try {
+    await fsp.writeFile("events.json", JSON.stringify(events, null, 2));
+  } catch (err) {
+    console.error("⚠️ events.json konnte nicht gespeichert werden:", err.message);
+  }
+}
+
+function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName }) {
+  if (!eventPlace) {
+    return false;
+  }
+
+  if (typeof eventPlace === "object") {
+    const candidateId = eventPlace.id !== undefined && eventPlace.id !== null
+      ? String(eventPlace.id)
+      : null;
+    if (targetId && candidateId && candidateId === targetId) {
+      return true;
+    }
+
+    const lat = toFiniteNumber(eventPlace.lat);
+    const lon = toFiniteNumber(eventPlace.lon);
+    if (refLat !== null && refLon !== null && lat !== null && lon !== null) {
+      const distance = haversine(lat, lon, refLat, refLon);
+      if (Number.isFinite(distance) && distance <= PLACE_MATCH_RADIUS_METERS) {
+        return true;
+      }
+    }
+
+    const candidateName = typeof eventPlace.name === "string"
+      ? eventPlace.name.trim().toLowerCase()
+      : "";
+    if (refName && candidateName && candidateName === refName) {
+      return true;
+    }
+  } else if (typeof eventPlace === "string" && refName) {
+    if (eventPlace.trim().toLowerCase() === refName) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function applyPlaceUpdateToEvents(originalPlace, updatedPlace) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return;
+  }
+
+  const normalizedUpdated = normalizeEventPlace(updatedPlace);
+  const normalizedOriginal = normalizeEventPlace(originalPlace);
+  const reference = normalizedUpdated || normalizedOriginal;
+
+  if (!reference) {
+    return;
+  }
+
+  const targetId = reference.id ? String(reference.id) : null;
+  const refLat = normalizedOriginal && normalizedOriginal.lat !== undefined
+    ? toFiniteNumber(normalizedOriginal.lat)
+    : (normalizedUpdated ? toFiniteNumber(normalizedUpdated.lat) : null);
+  const refLon = normalizedOriginal && normalizedOriginal.lon !== undefined
+    ? toFiniteNumber(normalizedOriginal.lon)
+    : (normalizedUpdated ? toFiniteNumber(normalizedUpdated.lon) : null);
+  const refName = normalizedOriginal && normalizedOriginal.name
+    ? String(normalizedOriginal.name).trim().toLowerCase()
+    : (normalizedUpdated && normalizedUpdated.name
+        ? String(normalizedUpdated.name).trim().toLowerCase()
+        : "");
+
+  const criteria = { targetId, refLat, refLon, refName };
+  const replacement = normalizedUpdated ? { ...normalizedUpdated } : null;
+  let changed = false;
+
+  for (const event of events) {
+    if (!event || typeof event !== "object" || !event.place) {
+      continue;
+    }
+
+    if (eventPlaceMatchesTarget(event.place, criteria)) {
+      event.place = replacement;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await persistEvents();
+  }
+}
+
 function parsePlacePayload(payload) {
   if (!payload || typeof payload !== "object") {
     throw new Error("Body muss ein Objekt sein.");
@@ -267,6 +405,14 @@ async function initializeState() {
           .split(/\r?\n/)
           .filter(line => line.trim().length > 0);
         logCounts[hex] = lines.length;
+        if (lines.length > 0) {
+          const lastLine = lines[lines.length - 1];
+          try {
+            lastLogRecords[hex] = JSON.parse(lastLine);
+          } catch (parseErr) {
+            console.warn("⚠️ Letzter Log-Eintrag konnte nicht geparst werden für", hex, parseErr.message);
+          }
+        }
       } catch (err) {
         console.error("⚠️ Log-Datei konnte nicht gelesen werden:", file, err.message);
         logCounts[hex] = logCounts[hex] || 0;
@@ -280,15 +426,53 @@ async function initializeState() {
     const savedEvents = await fsp.readFile("events.json", "utf8");
     const parsed = JSON.parse(savedEvents);
     if (Array.isArray(parsed)) {
-      events = parsed;
+      let maxExistingId = 0;
+      for (const entry of parsed) {
+        const numericId = Number(entry && entry.id);
+        if (Number.isFinite(numericId) && numericId > maxExistingId) {
+          maxExistingId = numericId;
+        }
+      }
+
+      lastEventId = maxExistingId;
+
+      const sanitized = [];
+      let requiresPersist = false;
+
+      for (const entry of parsed) {
+        if (!entry || typeof entry !== "object") {
+          continue;
+        }
+
+        if (entry.id === undefined || entry.id === null || entry.id === "") {
+          entry.id = generateEventId();
+          requiresPersist = true;
+        } else {
+          entry.id = String(entry.id);
+        }
+
+        if (Object.prototype.hasOwnProperty.call(entry, "place")) {
+          entry.place = normalizeEventPlace(entry.place);
+        }
+
+        sanitized.push(entry);
+      }
+
+      events = sanitized;
+
+      if (requiresPersist) {
+        await persistEvents();
+      }
     } else {
       events = [];
+      lastEventId = 0;
     }
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error("⚠️ events.json konnte nicht geladen werden:", err.message);
     }
     events = [];
+    lastEventId = 0;
   }
 
   try {
@@ -544,7 +728,11 @@ function determinePlaceForRecord(record) {
         ? place.type
         : "unknown";
 
-    return { name, lat: placeLat, lon: placeLon, type };
+    const snapshot = { name, lat: placeLat, lon: placeLon, type };
+    if (place.id !== undefined && place.id !== null) {
+      snapshot.id = String(place.id);
+    }
+    return snapshot;
   }
 
   return { type: "external" };
@@ -578,18 +766,14 @@ async function registerEvent(type, record, options = {}) {
     lastSeen: record.lastSeen
   };
 
+  event.id = generateEventId();
+
   if (options && Object.prototype.hasOwnProperty.call(options, "place")) {
     const placeInfo = options.place;
-    event.place = placeInfo && typeof placeInfo === "object"
-      ? { ...placeInfo }
-      : placeInfo;
+    event.place = normalizeEventPlace(placeInfo);
   }
   events.push(event);
-  try {
-    await fsp.writeFile("events.json", JSON.stringify(events, null, 2));
-  } catch (err) {
-    console.error("⚠️ events.json konnte nicht gespeichert werden:", err.message);
-  }
+  await persistEvents();
   console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
 }
 
@@ -811,6 +995,7 @@ async function appendLogRecord(record) {
   }
 
   logCounts[hex] = (logCounts[hex] || 0) + 1;
+  lastLogRecords[hex] = { ...record };
 
   if (logCounts[hex] > 5000) {
     try {
@@ -838,9 +1023,32 @@ async function handleLogRequest(q, res) {
   const hex = q.query.hex ? q.query.hex.toLowerCase() : null;
 
   if (!hex) {
-    const overview = Object.keys(logCounts)
-      .sort()
-      .map(key => ({ hex: key, count: logCounts[key] || 0 }));
+    const keys = new Set([
+      ...Object.keys(logCounts),
+      ...Object.keys(lastLogRecords)
+    ]);
+
+    const overview = Array.from(keys)
+      .map(key => {
+        const last = lastLogRecords[key];
+        return {
+          hex: key,
+          count: logCounts[key] || 0,
+          last: last ? { ...last } : null
+        };
+      })
+      .sort((a, b) => {
+        const timeA = Date.parse(a.last && a.last.time ? a.last.time : 0);
+        const timeB = Date.parse(b.last && b.last.time ? b.last.time : 0);
+        const aInvalid = Number.isNaN(timeA);
+        const bInvalid = Number.isNaN(timeB);
+        if (aInvalid && bInvalid) {
+          return a.hex.localeCompare(b.hex);
+        }
+        if (aInvalid) return 1;
+        if (bInvalid) return -1;
+        return timeB - timeA;
+      });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(overview));
     return;
@@ -1082,7 +1290,14 @@ async function handleSetRequest(res, hexParam) {
       startScrapeLoop();
     }
     console.log("🎯 Navigiere zu neuem Ziel:", targetHex);
-    sendJSON(res, 200, { success: true, hex: targetHex });
+    const responsePayload = { success: true, hex: targetHex };
+    if (latestData && typeof latestData === "object") {
+      const latestHex = latestData.hex ? String(latestData.hex).toLowerCase() : null;
+      if (latestHex && latestHex === targetHex && latestData.callsign) {
+        responsePayload.callsign = latestData.callsign;
+      }
+    }
+    sendJSON(res, 200, responsePayload);
   } catch (err) {
     console.error("❌ Navigation zum neuen Ziel fehlgeschlagen:", err.message);
     sendError(res, 500, "Navigation fehlgeschlagen.");
@@ -1104,6 +1319,39 @@ async function handleRequest(req, res) {
 
   if (q.pathname === "/events") {
     sendJSON(res, 200, events);
+    return;
+  }
+
+  if (q.pathname && q.pathname.startsWith("/events/")) {
+    const segments = q.pathname.split("/").filter(Boolean);
+    if (segments.length === 2) {
+      let eventId;
+      try {
+        eventId = decodeURIComponent(segments[1]);
+      } catch (err) {
+        sendError(res, 400, "Ungültige Event-ID.");
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        const before = events.length;
+        events = events.filter(event => !(event && String(event.id) === String(eventId)));
+
+        if (events.length === before) {
+          sendError(res, 404, "Event nicht gefunden.");
+          return;
+        }
+
+        await persistEvents();
+        sendJSON(res, 200, { success: true });
+        return;
+      }
+
+      sendError(res, 405, "Methode nicht erlaubt.");
+      return;
+    }
+
+    sendError(res, 404, "Pfad nicht gefunden.");
     return;
   }
 
@@ -1196,10 +1444,14 @@ async function handleRequest(req, res) {
           return;
         }
 
-        const updatedPlace = { ...current[index], ...placeData, id: current[index].id ?? placeId };
+        const originalPlace = current[index];
+        const updatedPlace = { ...originalPlace, ...placeData, id: originalPlace?.id ?? placeId };
         const updatedList = [...current];
         updatedList[index] = updatedPlace;
         await savePlaces(updatedList);
+        await applyPlaceUpdateToEvents(originalPlace, updatedPlace).catch(err => {
+          console.error("⚠️ Events konnten nach Orts-Update nicht angepasst werden:", err.message);
+        });
         sendJSON(res, 200, updatedPlace);
         return;
       }
