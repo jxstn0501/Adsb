@@ -4,310 +4,139 @@
   <meta charset="UTF-8" />
   <title>Heli Tracker</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    html, body {
-      margin: 0; padding: 0; height: 100%; width: 100%;
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #f2f2f7;
-      color: #111;
-    }
-    body { display: flex; flex-direction: column; }
-
-    /* Sidebar */
-    .sidebar {
-      position: fixed;
-      top: 0; left: -260px;
-      width: 240px; height: 100%;
-      background: #1c1c1e;
-      color: #fff;
-      overflow-y: auto;
-      transition: left 0.3s ease;
-      z-index: 1000;
-      padding: 20px 15px;
-    }
-    .sidebar.active { left: 0; }
-    .sidebar h2 {
-      margin-top: 0; font-size: 18px; margin-bottom: 12px;
-    }
-    .sidebar button {
-      width: 100%; padding: 12px; margin: 6px 0;
-      border: none; border-radius: 6px;
-      background: #2c2c2e; color: #fff;
-      font-size: 16px; cursor: pointer;
-    }
-    .sidebar button:hover { background: #3a3a3c; }
-
-    /* Overlay hinter Sidebar */
-    .overlay {
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.4);
-      opacity: 0; visibility: hidden;
-      transition: opacity 0.3s ease;
-      z-index: 900;
-    }
-    .overlay.active {
-      opacity: 1; visibility: visible;
-    }
-
-    /* Topbar */
-    .topbar {
-      height: 50px;
-      background: #ff3b30;
-      color: #fff;
-      display: flex; align-items: center;
-      padding: 0 15px;
-    }
-    .menu-btn {
-      font-size: 22px; cursor: pointer;
-      background: none; border: none; color: #fff;
-    }
-    .title {
-      margin-left: 10px; font-weight: 600; font-size: 18px;
-    }
-
-    /* Main Content */
-    #content {
-      flex: 1;
-      height: calc(100% - 50px);
-      width: 100%;
-      background: #f2f2f7;
-      position: relative;
-      overflow-y: auto;
-    }
-    iframe {
-      border: none; width: 100%; height: 100%;
-    }
-    .map-view {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      width: 100%;
-    }
-    .map-view iframe {
-      flex: 1 1 auto;
-      width: 100%;
-      border: none;
-    }
-    .map-link {
-      margin: 0;
-      padding: 12px 16px;
-      background: #f2f2f7;
-      text-align: center;
-      font-size: 14px;
-    }
-    .map-link a {
-      color: #ff3b30;
-      text-decoration: none;
-      font-weight: 600;
-    }
-    .map-link a:hover {
-      text-decoration: underline;
-    }
-    .logs {
-      padding: 10px; color: #111; background: #f2f2f7;
-      overflow-y: auto; height: 100%;
-    }
-    .log-entry {
-      background: #fff; margin: 6px 0; padding: 8px 10px;
-      border-radius: 12px; font-size: 14px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    button.log-entry {
-      border: none;
-      width: 100%;
-      text-align: left;
-      cursor: pointer;
-    }
-    button.log-entry:focus {
-      outline: none;
-    }
-
-    .settings {
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .settings-section {
-      background: #fff;
-      border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-    }
-    .settings-section h3,
-    .settings-section h4 {
-      margin: 0 0 10px;
-    }
-    .settings label {
-      display: block;
-      font-size: 13px;
-      color: #555;
-      margin-top: 12px;
-    }
-    .settings input {
-      width: 100%;
-      padding: 10px 12px;
-      margin-top: 6px;
-      border-radius: 8px;
-      border: 1px solid #d1d1d6;
-      font-size: 15px;
-      box-sizing: border-box;
-      background: #fff;
-    }
-    .settings input:focus {
-      outline: none;
-      border-color: #ff3b30;
-      box-shadow: 0 0 0 3px rgba(255,59,48,0.15);
-    }
-    .settings .primary-button {
-      width: 100%;
-      padding: 12px;
-      margin-top: 14px;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      background: #ff3b30;
-      color: #fff;
-      cursor: pointer;
-      transition: opacity 0.2s ease;
-    }
-    .settings .primary-button:hover { opacity: 0.9; }
-    .settings .button-row {
-      display: flex;
-      gap: 10px;
-      margin-top: 12px;
-    }
-    .settings .button-row .primary-button {
-      margin-top: 0;
-    }
-    .settings .button-secondary {
-      flex: 1;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      background: #d1d1d6;
-      color: #1c1c1e;
-      cursor: pointer;
-    }
-    .settings .button-secondary:hover { background: #c7c7cc; }
-    .settings table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    .settings th, .settings td {
-      text-align: left; padding: 8px; border-bottom: 1px solid #ddd;
-      font-size: 14px;
-    }
-    .settings th { background: #f2f2f7; }
-    .settings .search-row {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-top: 6px;
-    }
-    .settings .search-row input {
-      flex: 1;
-    }
-    .settings .search-row button {
-      flex-shrink: 0;
-      padding: 10px 14px;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      background: #2c2c2e;
-      color: #fff;
-      cursor: pointer;
-      transition: background 0.2s ease;
-    }
-    .settings .search-row button:hover { background: #3a3a3c; }
-    .settings .search-status {
-      font-size: 13px;
-      color: #666;
-      margin: 6px 0;
-      min-height: 18px;
-    }
-    .settings .search-status.success { color: #34c759; }
-    .settings .search-status.error { color: #ff3b30; }
-    .settings .search-results {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .settings .search-result {
-      border: 1px solid #d1d1d6;
-      border-radius: 8px;
-      padding: 10px 12px;
-      background: #f9f9fb;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    .settings .search-result.selected {
-      border-color: #ff3b30;
-      box-shadow: 0 0 0 2px rgba(255,59,48,0.15);
-    }
-    .settings .search-result-title {
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    .settings .search-result-coords {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 12px;
-      margin-bottom: 4px;
-    }
-    .settings .search-result small {
-      color: #666;
-      display: block;
-    }
-    .settings .search-result button {
-      margin-top: 8px;
-      border: none;
-      border-radius: 6px;
-      background: #ff3b30;
-      color: #fff;
-      padding: 6px 10px;
-      font-size: 13px;
-      cursor: pointer;
-      transition: opacity 0.2s ease;
-    }
-    .settings .search-result button:hover { opacity: 0.9; }
-    .settings .place-actions { display: flex; gap: 6px; }
-    .settings .action-btn {
-      padding: 6px 10px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-      background: #2c2c2e;
-      color: #fff;
-      transition: background 0.2s ease;
-    }
-    .settings .action-btn:hover { background: #3a3a3c; }
-    .settings .action-btn.danger { background: #ff453a; }
-    .settings .action-btn.danger:hover { background: #ff5e57; }
-    .settings .empty-state { font-size: 14px; color: #666; margin-top: 12px; }
-    .settings-message { font-size: 14px; margin-top: 8px; min-height: 18px; }
-    .settings-message.success { color: #34c759; }
-    .settings-message.error { color: #ff3b30; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui']
+          },
+          colors: {
+            brand: {
+              red: '#E11937',
+              purple: '#6C63FF'
+            }
+          },
+          boxShadow: {
+            card: '0 25px 65px -20px rgba(15, 23, 42, 0.3)'
+          }
+        }
+      }
+    };
+  </script>
 </head>
-<body>
-  <div class="topbar">
-    <button class="menu-btn" onclick="toggleSidebar()">☰</button>
-    <div class="title">Heli Tracker</div>
+<body class="min-h-screen bg-slate-100 font-sans text-slate-900 antialiased">
+  <div class="flex h-screen overflow-hidden">
+    <aside
+      id="sidebar"
+      class="fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full transform flex-col justify-between gap-8 overflow-y-auto bg-slate-900/95 px-6 py-8 text-white shadow-2xl transition-transform duration-300 ease-in-out lg:static lg:inset-auto lg:translate-x-0 lg:shadow-none lg:bg-slate-900"
+    >
+      <div>
+        <div class="flex items-center gap-3 rounded-3xl bg-white/10 px-5 py-4 backdrop-blur">
+          <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/20 text-lg font-semibold uppercase tracking-wide">
+            HT
+          </div>
+          <div class="space-y-1">
+            <p class="text-[0.65rem] uppercase tracking-[0.45em] text-white/60">Control Center</p>
+            <p class="text-lg font-semibold tracking-wide">Heli Tracker</p>
+          </div>
+        </div>
+        <nav class="mt-10 space-y-3">
+          <button
+            onclick="showADSB()"
+            class="group flex w-full items-center justify-between rounded-full bg-white/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+          >
+            <span class="flex items-center gap-3">
+              <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12m-1.5 0v8.25a1.5 1.5 0 01-1.5 1.5h-3.75m-9 0H3.75a1.5 1.5 0 01-1.5-1.5V12" />
+                </svg>
+              </span>
+              <span>Map</span>
+            </span>
+            <span class="rounded-full bg-white/20 px-3 py-1 text-[0.65rem] font-medium tracking-[0.4em] text-white/70 transition group-hover:bg-white/30">LIVE</span>
+          </button>
+          <button
+            onclick="showEvents()"
+            class="group flex w-full items-center gap-3 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+          >
+            <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h18m-16.5 6h15m-13.5 6h12" />
+              </svg>
+            </span>
+            <span class="flex-1 text-left">Events</span>
+          </button>
+          <button
+            onclick="showLogs()"
+            class="group flex w-full items-center gap-3 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+          >
+            <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.25h13.5m-13.5 4.5h13.5m-13.5 4.5h9" />
+              </svg>
+            </span>
+            <span class="flex-1 text-left">Logs</span>
+          </button>
+          <button
+            onclick="showSettings()"
+            class="group flex w-full items-center gap-3 rounded-full bg-brand-purple/80 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+          >
+            <span class="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 4.5l.41-1.233A.75.75 0 0112.38 3h.24a.75.75 0 01.72.533L13.75 4.5h1.5l.41-1.233A.75.75 0 0116.88 3h.24a.75.75 0 01.72.533L18.25 4.5m-7 16.5l-.41 1.233a.75.75 0 01-.72.533h-.24a.75.75 0 01-.72-.533L8.75 21h-1.5l-.41 1.233a.75.75 0 01-.72.533h-.24a.75.75 0 01-.72-.533L4.75 21m15-16.5H4.25a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25z" />
+              </svg>
+            </span>
+            <span class="flex-1 text-left">Settings</span>
+          </button>
+        </nav>
+      </div>
+      <div class="rounded-3xl bg-white/10 px-5 py-4 text-[0.7rem] uppercase tracking-[0.35em] text-white/70 backdrop-blur">
+        Stay in control. Monitor every takeoff and landing with precision.
+      </div>
+    </aside>
+
+    <div class="flex flex-1 flex-col bg-gradient-to-br from-slate-100 via-white to-slate-200 lg:ml-72">
+      <header class="relative z-20 flex h-20 items-center justify-between bg-brand-red px-6 shadow-lg shadow-brand-red/30">
+        <div class="flex items-center gap-4">
+          <button
+            class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 lg:hidden"
+            onclick="toggleSidebar()"
+            aria-label="Menü öffnen"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5m-16.5 5.25h16.5m-16.5 5.25h16.5" />
+            </svg>
+          </button>
+          <div class="space-y-1">
+            <p class="text-[0.65rem] uppercase tracking-[0.45em] text-white/70">Live Flight Monitor</p>
+            <h1 class="text-2xl font-semibold text-white">Heli Tracker</h1>
+          </div>
+        </div>
+        <div id="headerHex" class="rounded-full bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/80">
+          —
+        </div>
+      </header>
+
+      <main id="content" class="relative flex-1 overflow-y-auto px-6 py-8">
+        <div class="flex h-full items-center justify-center">
+          <div class="rounded-3xl bg-white/80 px-8 py-6 text-base font-medium text-slate-600 shadow-card backdrop-blur">
+            Lade Daten...
+          </div>
+        </div>
+      </main>
+    </div>
   </div>
 
-  <div id="content">
-    <div class="logs">Lade Daten...</div>
-  </div>
-
-  <!-- Sidebar -->
-  <div id="sidebar" class="sidebar">
-    <h2>Menü</h2>
-    <button onclick="showADSB()">ADSBExchange Map</button>
-    <button onclick="showEvents()">Meine Events</button>
-    <button onclick="showLogs()">Meine Logs</button>
-    <button onclick="showSettings()">Einstellungen</button>
-  </div>
-  <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
+  <div
+    id="overlay"
+    class="pointer-events-none fixed inset-0 z-30 bg-slate-900/60 opacity-0 transition-opacity duration-300 lg:hidden"
+    onclick="closeSidebar()"
+  ></div>
 
   <script>
     let currentHex = "";
@@ -322,14 +151,17 @@
     window.addEventListener("DOMContentLoaded", initializeTracker);
 
     async function initializeTracker() {
-      document.getElementById("content").innerHTML = '<div class="logs">Lade Daten...</div>';
+      const container = document.getElementById("content");
+      if (container) {
+        container.innerHTML = createStatusCard("Lade Daten...");
+      }
 
       const detectedHex = (await fetchLatestHex()) || (await fetchFirstHexFromLogs());
 
       if (detectedHex) {
         renderMap(detectedHex);
-      } else {
-        document.getElementById("content").innerHTML = '<div class="logs">Keine ICAO Hex verfügbar.</div>';
+      } else if (container) {
+        container.innerHTML = createStatusCard("Keine ICAO Hex verfügbar.");
       }
     }
 
@@ -371,27 +203,70 @@
       if (input) {
         input.value = currentHex;
       }
+      const badge = document.getElementById("headerHex");
+      if (badge) {
+        badge.textContent = currentHex ? currentHex.toUpperCase() : "—";
+      }
     }
 
     function setHexStatus(message, type = "") {
       const el = document.getElementById("hexStatus");
       if (!el) return;
-      el.textContent = message || "";
-      el.classList.remove("success", "error");
-      if (type) {
-        el.classList.add(type);
+      const base = "mt-4 text-sm font-medium tracking-wide";
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
       }
+      el.className = `${base} ${color}`;
+      el.textContent = message || "";
     }
 
     function renderMap(hex = currentHex) {
       if (!hex) {
-        document.getElementById("content").innerHTML = '<div class="logs">Bitte eine ICAO Hex eingeben.</div>';
+        const container = document.getElementById("content");
+        if (container) {
+          container.innerHTML = createStatusCard("Bitte eine ICAO Hex eingeben.");
+        }
         return;
       }
 
       setCurrentHex(hex);
-      document.getElementById("content").innerHTML =
-        `<iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"></iframe>`;
+      const overlayCard = `
+        <div class="pointer-events-none absolute inset-0 flex flex-col justify-between p-6">
+          <div class="flex justify-end">
+            <div class="pointer-events-none max-w-sm rounded-3xl bg-white/90 px-6 py-5 shadow-card ring-1 ring-white/40 backdrop-blur">
+              <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">Aktives Ziel</p>
+              <p class="mt-2 text-2xl font-semibold text-slate-900">${currentHex.toUpperCase()}</p>
+              <p class="mt-3 text-sm text-slate-500">Live-Tracking über ADS-B Exchange Globe.</p>
+            </div>
+          </div>
+          <div class="flex justify-between">
+            <div class="hidden gap-2 md:flex">
+              ${createIconPill("Wetter")}
+              ${createIconPill("Wind")}
+              ${createIconPill("Temp")}
+            </div>
+            <div class="pointer-events-none rounded-full bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-slate-500 shadow-card backdrop-blur">
+              Fokus: ${currentHex.toUpperCase()}
+            </div>
+          </div>
+        </div>`;
+
+      const container = document.getElementById("content");
+      if (container) {
+        container.innerHTML = `
+          <div class="relative h-[calc(100vh-8rem)] min-h-[28rem] overflow-hidden rounded-[2.5rem] bg-slate-200 shadow-card ring-1 ring-slate-200/70">
+            <iframe src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}" class="absolute inset-0 h-full w-full border-0"></iframe>
+            <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-900/10 via-transparent to-slate-900/20"></div>
+            ${overlayCard}
+          </div>`;
+      }
+    }
+
+    function createIconPill(label) {
+      return `<span class="pointer-events-none inline-flex h-10 items-center justify-center rounded-full bg-white/80 px-4 text-xs font-semibold uppercase tracking-[0.35em] text-slate-500 shadow-card backdrop-blur">${escapeHtml(label)}</span>`;
     }
 
     function openMap(lat, lon) {
@@ -401,7 +276,7 @@
       const target = document.getElementById("content");
       if (!target) return;
 
-      const invalidMessage = '<div class="logs">Ungültige Koordinaten für dieses Event.</div>';
+      const invalidMessage = createStatusCard("Ungültige Koordinaten für dieses Event.");
 
       if (lat === null || lat === undefined || lon === null || lon === undefined) {
         target.innerHTML = invalidMessage;
@@ -439,23 +314,77 @@
       const embedSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${bboxParam}&layer=mapnik&marker=${markerParam}`;
       const externalLink = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latStr)}&mlon=${encodeURIComponent(lonStr)}#map=15/${encodeURIComponent(latStr)}/${encodeURIComponent(lonStr)}`;
 
-      target.innerHTML = `
-        <div class="map-view">
-          <iframe src="${embedSrc}" title="OpenStreetMap" loading="lazy"></iframe>
-          <p class="map-link">Marker bei ${escapeHtml(latStr)}, ${escapeHtml(lonStr)} –
-            <a href="${externalLink}" target="_blank" rel="noopener">In OpenStreetMap öffnen</a>
-          </p>
+      const html = `
+        <div class="space-y-6">
+          <div class="rounded-[2.5rem] bg-white/90 p-6 shadow-card ring-1 ring-white/40 backdrop-blur">
+            <div class="relative h-[60vh] min-h-[24rem] overflow-hidden rounded-[2rem] bg-slate-200">
+              <iframe src="${embedSrc}" class="absolute inset-0 h-full w-full border-0" loading="lazy" referrerpolicy="no-referrer"></iframe>
+              <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-900/10 via-transparent to-slate-900/20"></div>
+            </div>
+            <div class="mt-6 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">Event Position</p>
+                <p class="mt-2 text-2xl font-semibold text-slate-900">${latStr}, ${lonStr}</p>
+                <p class="mt-2 text-sm text-slate-500">Zoom auf das Ereignis im OpenStreetMap-Viewer.</p>
+              </div>
+              <a
+                href="${externalLink}"
+                target="_blank"
+                rel="noopener"
+                class="inline-flex items-center gap-2 rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5H19.5V10.5M19.5 4.5L12 12" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12.75V18a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18V6.75A2.25 2.25 0 016.75 4.5H12" />
+                </svg>
+                Karte öffnen
+              </a>
+            </div>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            ${createInfoCard("Latitude", latStr)}
+            ${createInfoCard("Longitude", lonStr)}
+          </div>
         </div>`;
+
+      target.innerHTML = html;
+    }
+
+    function createInfoCard(label, value) {
+      return `<div class="rounded-3xl bg-white/90 px-6 py-5 shadow-card ring-1 ring-white/40 backdrop-blur">
+        <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">${escapeHtml(label)}</p>
+        <p class="mt-2 text-xl font-semibold text-slate-900">${escapeHtml(value)}</p>
+      </div>`;
     }
 
     function toggleSidebar() {
-      document.getElementById("sidebar").classList.toggle("active");
-      document.getElementById("overlay").classList.toggle("active");
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      if (sidebar.classList.contains("-translate-x-full")) {
+        openSidebar();
+      } else {
+        closeSidebar();
+      }
+    }
+
+    function openSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      const overlay = document.getElementById("overlay");
+      if (!sidebar || !overlay) return;
+      sidebar.classList.remove("-translate-x-full");
+      overlay.classList.remove("pointer-events-none");
+      overlay.classList.remove("opacity-0");
+      overlay.classList.add("opacity-100");
     }
 
     function closeSidebar() {
-      document.getElementById("sidebar").classList.remove("active");
-      document.getElementById("overlay").classList.remove("active");
+      const sidebar = document.getElementById("sidebar");
+      const overlay = document.getElementById("overlay");
+      if (!sidebar || !overlay) return;
+      sidebar.classList.add("-translate-x-full");
+      overlay.classList.add("pointer-events-none");
+      overlay.classList.add("opacity-0");
+      overlay.classList.remove("opacity-100");
     }
 
     function stopSettingsInterval() {
@@ -473,7 +402,7 @@
 
     async function showEvents() {
       stopSettingsInterval();
-      let html = '<div class="logs">';
+      let html = '<div class="logs grid gap-6 p-2 sm:p-4 lg:grid-cols-2 xl:grid-cols-3">';
 
       try {
         const r = await fetch("/events");
@@ -482,7 +411,7 @@
         }
         const data = await r.json();
         if (!Array.isArray(data) || data.length === 0) {
-          html += 'keine Events gefunden';
+          html += createEmptyCard("Keine Events gefunden");
         } else {
           data.forEach(ev => {
             const typeRaw = typeof ev.type === "string" ? ev.type : "";
@@ -493,25 +422,51 @@
             const latParam = hasCoords ? latNum.toFixed(6) : "null";
             const lonParam = hasCoords ? lonNum.toFixed(6) : "null";
             const locationHtml = buildEventLocationHtml(type, ev.place);
+            const title = escapeHtml(typeRaw || '').toUpperCase();
+            const callsign = escapeHtml(ev.callsign || ev.hex || '—');
+            const details = `Alt ${escapeHtml(ev.alt || '—')} ft • Speed ${escapeHtml(ev.gs || '—')} kt`;
+            const coord = `${escapeHtml(ev.lat || '—')}, ${escapeHtml(ev.lon || '—')}`;
+            const time = escapeHtml(ev.time || '');
 
-            const entryContent = `<b>${escapeHtml(typeRaw || '').toUpperCase()}</b> – ${escapeHtml(ev.callsign||ev.hex||'—')}<br>
-          Alt: ${escapeHtml(ev.alt||'—')} ft | Speed: ${escapeHtml(ev.gs||'—')} kt<br>
-          ${locationHtml}<br>
-          ${escapeHtml(ev.lat||'—')}, ${escapeHtml(ev.lon||'—')}<br>
-          <small>${escapeHtml(ev.time||'')}</small>`;
+            const cardContent = `
+              <div class="flex flex-col gap-5 text-left">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">${title}</p>
+                    <h3 class="mt-2 text-xl font-semibold text-slate-900">${callsign}</h3>
+                    <p class="mt-3 text-sm font-medium text-slate-500">${details}</p>
+                  </div>
+                  <div class="hidden gap-2 sm:flex">
+                    ${createIconButton("Wetter")}
+                    ${createIconButton("Wind")}
+                    ${createIconButton("Temp")}
+                  </div>
+                </div>
+                <dl class="grid gap-4 text-sm text-slate-600 sm:grid-cols-2">
+                  <div>
+                    <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Ort</dt>
+                    <dd class="mt-2 font-medium text-slate-700">${locationHtml}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Koordinaten</dt>
+                    <dd class="mt-2 font-medium text-slate-700">${coord}</dd>
+                  </div>
+                </dl>
+                <p class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">${time}</p>
+              </div>`;
 
             if (hasCoords) {
               const buttonClass = type === "landing" ? "landing-entry" : "takeoff-entry";
-              html += `<button type="button" class="log-entry ${buttonClass} event-entry" onclick="openMap(${latParam}, ${lonParam})">${entryContent}</button>`;
+              html += `<button type="button" class="log-entry ${buttonClass} event-entry group w-full rounded-3xl bg-white/90 p-6 text-left shadow-card ring-1 ring-white/40 backdrop-blur transition hover:-translate-y-1 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red" onclick="openMap(${latParam}, ${lonParam})">${cardContent}</button>`;
             } else {
-              html += `<div class="log-entry">${entryContent}</div>`;
+              html += `<div class="log-entry rounded-3xl bg-white/90 p-6 shadow-card ring-1 ring-white/40 backdrop-blur">${cardContent}</div>`;
             }
           });
         }
       } catch (err) {
         console.error("[Events] Fehler beim Laden der Events:", err);
         const message = err && err.message ? err.message : String(err);
-        html += `Fehler beim Laden der Events (${escapeHtml(message)})`;
+        html += createEmptyCard(`Fehler beim Laden der Events (${escapeHtml(message)})`);
       }
 
       html += '</div>';
@@ -519,78 +474,28 @@
       closeSidebar();
     }
 
-    function buildEventLocationHtml(eventType, placeInfo) {
-      const normalizedType = typeof eventType === "string" ? eventType.toLowerCase() : "";
-      const fallback = normalizedType === "landing"
-        ? "Außenlandung"
-        : normalizedType === "takeoff"
-          ? "Außentakeoff"
-          : "Externes Ereignis";
+    function createIconButton(label) {
+      return `<span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 shadow-sm shadow-slate-200/70">${escapeHtml(label.charAt(0))}</span>`;
+    }
 
-      if (placeInfo === null || placeInfo === undefined) {
-        return escapeHtml(fallback);
-      }
-
-      if (typeof placeInfo === "string") {
-        const trimmed = placeInfo.trim();
-        return trimmed ? `Ort: ${escapeHtml(trimmed)}` : escapeHtml(fallback);
-      }
-
-      if (typeof placeInfo !== "object") {
-        return escapeHtml(fallback);
-      }
-
-      const typeRaw = placeInfo.type !== undefined && placeInfo.type !== null
-        ? String(placeInfo.type).trim()
-        : "";
-
-      if (typeRaw.toLowerCase() === "external") {
-        return escapeHtml(fallback);
-      }
-
-      const nameRaw = placeInfo.name !== undefined && placeInfo.name !== null
-        ? String(placeInfo.name).trim()
-        : "";
-      const typeLabelRaw = typeRaw && typeRaw.toLowerCase() !== "unknown"
-        ? typeRaw
-        : "";
-
-      if (!nameRaw && !typeLabelRaw) {
-        return escapeHtml(fallback);
-      }
-
-      const nameHtml = nameRaw ? escapeHtml(nameRaw) : "";
-      const typeHtml = typeLabelRaw ? escapeHtml(typeLabelRaw) : "";
-
-      if (nameRaw && typeLabelRaw) {
-        return `Ort: ${nameHtml} (${typeHtml})`;
-      }
-
-      if (nameRaw) {
-        return `Ort: ${nameHtml}`;
-      }
-
-      return `Ort: ${typeHtml}`;
+    function createEmptyCard(message) {
+      return `<div class="rounded-3xl bg-white/70 p-6 text-center text-sm font-medium text-slate-600 shadow-card backdrop-blur">${escapeHtml(message)}</div>`;
     }
 
     async function showLogs() {
       stopSettingsInterval();
-      let html = '<div class="logs">';
+      let html = '<div class="logs grid gap-6 p-2 sm:p-4 lg:grid-cols-2 xl:grid-cols-3">';
 
       if (!currentHex) {
-        html += 'Bitte eine ICAO Hex eingeben.';
+        html += createEmptyCard("Bitte eine ICAO Hex eingeben.");
         html += '</div>';
         document.getElementById("content").innerHTML = html;
         closeSidebar();
         return;
       }
 
-      console.log("[Logs] Lade Daten für", currentHex);
-
       try {
         const r = await fetch(`/log?hex=${encodeURIComponent(currentHex)}`);
-        console.log("[Logs] Antwortstatus:", r.status);
-
         let data = [];
         if (r.status === 404) {
           console.warn(`[Logs] Keine Log-Datei für ${currentHex} gefunden.`);
@@ -600,31 +505,52 @@
           data = await r.json();
         }
 
-        console.log("[Logs] Antwortgröße:", Array.isArray(data) ? data.length : data);
-
         if (!Array.isArray(data) || data.length === 0) {
-          console.warn(`[Logs] Keine Daten für ${currentHex} erhalten.`);
-          html += 'keine Daten gefunden';
+          html += createEmptyCard("Keine Daten gefunden");
         } else {
-          console.log(`[Logs] Verarbeite ${Math.min(data.length, 200)} von ${data.length} Einträgen.`);
           data.slice(-200).forEach(d => {
-            html += `<div class="log-entry">
-          ${d.callsign||d.hex} – Alt ${d.alt||'—'} ft, Speed ${d.gs||'—'} kt<br>
-          Pos: ${d.lat}, ${d.lon}<br>
-          <small>${d.time}</small>
-        </div>`;
+            const callsign = escapeHtml(d.callsign || d.hex || '—');
+            const altitude = escapeHtml(d.alt || '—');
+            const speed = escapeHtml(d.gs || '—');
+            const lat = escapeHtml(d.lat || '—');
+            const lon = escapeHtml(d.lon || '—');
+            const time = escapeHtml(d.time || '');
+
+            html += `<div class="log-entry rounded-3xl bg-white/90 p-6 shadow-card ring-1 ring-white/40 backdrop-blur transition hover:-translate-y-1 hover:shadow-2xl">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-[0.65rem] uppercase tracking-[0.4em] text-slate-400">TAKEOFF – ${callsign}</p>
+                  <p class="mt-3 text-sm font-medium text-slate-500">Alt ${altitude} ft • Speed ${speed} kt</p>
+                </div>
+                <div class="flex gap-2">
+                  ${createIconButton("W")}
+                  ${createIconButton("T")}
+                </div>
+              </div>
+              <dl class="mt-5 grid gap-4 text-sm text-slate-600 sm:grid-cols-2">
+                <div>
+                  <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Position</dt>
+                  <dd class="mt-2 font-medium text-slate-700">${lat}, ${lon}</dd>
+                </div>
+                <div>
+                  <dt class="text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">Hex</dt>
+                  <dd class="mt-2 font-medium text-slate-700">${currentHex.toUpperCase()}</dd>
+                </div>
+              </dl>
+              <p class="mt-6 text-[0.6rem] uppercase tracking-[0.4em] text-slate-400">${time}</p>
+            </div>`;
           });
         }
       } catch (err) {
         console.error("[Logs] Fehler beim Laden der Logs:", err);
-        html += `Fehler beim Laden der Logs (${err.message})`;
+        html += createEmptyCard(`Fehler beim Laden der Logs (${escapeHtml(err.message)})`);
       }
 
       html += '</div>';
       document.getElementById("content").innerHTML = html;
       closeSidebar();
     }
-    
+
     async function applyHex() {
       const input = document.getElementById("hexInput");
       const hex = input ? input.value.trim() : "";
@@ -679,18 +605,18 @@
         }
         const d = await res.json();
         if (!d || !d.time) return;
-        const row = `<tr>
-        <td>${d.time}</td>
-        <td>${d.callsign}</td>
-        <td>${d.hex}</td>
-        <td>${d.reg}</td>
-        <td>${d.type}</td>
-        <td>${d.gs}</td>
-        <td>${d.alt}</td>
-        <td>${d.lat}</td>
-        <td>${d.lon}</td>
-        <td>${d.vr}</td>
-        <td>${d.hdg}</td>
+        const row = `<tr class="divide-x divide-slate-100/60">
+        <td class="px-3 py-2 text-sm font-medium text-slate-700">${escapeHtml(d.time)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.callsign)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.hex)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.reg)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.type)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.gs)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.alt)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.lat)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.lon)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.vr)}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(d.hdg)}</td>
       </tr>`;
         const body = document.getElementById("latestBody");
         if (body) body.innerHTML = row;
@@ -705,7 +631,7 @@
 
       const container = document.getElementById("content");
       if (container) {
-        container.innerHTML = '<div class="settings"><div class="settings-section"><p>Lade Einstellungen...</p></div></div>';
+        container.innerHTML = '<div class="settings space-y-6"><div class="settings-section rounded-3xl bg-white/90 px-6 py-5 shadow-card ring-1 ring-white/40 backdrop-blur"><p class="text-sm text-slate-600">Lade Einstellungen...</p></div></div>';
       }
 
       try {
@@ -723,7 +649,7 @@
         console.error("[Settings] Fehler beim Laden:", err);
         if (container) {
           const message = err && err.message ? err.message : String(err);
-          container.innerHTML = `<div class="settings"><div class="settings-section"><p>Fehler beim Laden der Einstellungen: ${escapeHtml(message)}</p></div></div>`;
+          container.innerHTML = `<div class="settings space-y-6"><div class="settings-section rounded-3xl bg-white/90 px-6 py-5 shadow-card ring-1 ring-white/40 backdrop-blur"><p class="text-sm text-rose-500">Fehler beim Laden der Einstellungen: ${escapeHtml(message)}</p></div></div>`;
         }
       }
     }
@@ -733,105 +659,129 @@
       if (!container) return;
 
       const safeConfig = config || {};
-      const html = `<div class="settings">
-        <div class="settings-section">
-          <h3>Flugzeug</h3>
-          <label for="hexInput">ICAO Hex</label>
-          <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" />
-          <button class="primary-button" onclick="applyHex()">Flugzeug setzen</button>
-          <p id="hexStatus" class="search-status"></p>
+      const html = `<div class="settings space-y-6">
+        <div class="settings-section rounded-3xl bg-white/90 px-6 py-6 shadow-card ring-1 ring-white/40 backdrop-blur">
+          <h3 class="text-xl font-semibold text-slate-900">Flugzeug</h3>
+          <p class="mt-2 text-sm text-slate-500">Wähle die aktuelle ICAO Hex für den Live-Feed.</p>
+          <label for="hexInput" class="mt-5 block text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">ICAO Hex</label>
+          <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
+          <button class="primary-button mt-4 inline-flex w-full items-center justify-center rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70" onclick="applyHex()">Flugzeug setzen</button>
+          <p id="hexStatus" class="mt-4 text-sm font-medium tracking-wide text-slate-500"></p>
         </div>
-        <div class="settings-section">
-          <h3>Letzter Datensatz</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Zeit</th><th>Callsign</th><th>Hex</th><th>Reg</th><th>Type</th>
-                <th>GS</th><th>Alt</th><th>Lat</th><th>Lon</th><th>VR</th><th>Hdg</th>
-              </tr>
-            </thead>
-            <tbody id="latestBody"></tbody>
-          </table>
+        <div class="settings-section rounded-3xl bg-white/90 px-6 py-6 shadow-card ring-1 ring-white/40 backdrop-blur">
+          <h3 class="text-xl font-semibold text-slate-900">Letzter Datensatz</h3>
+          <div class="mt-4 overflow-hidden rounded-2xl border border-slate-100/80">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-xs uppercase tracking-[0.3em] text-slate-400">
+              <thead class="bg-slate-50/60">
+                <tr>
+                  <th class="px-3 py-3 font-semibold">Zeit</th>
+                  <th class="px-3 py-3 font-semibold">Callsign</th>
+                  <th class="px-3 py-3 font-semibold">Hex</th>
+                  <th class="px-3 py-3 font-semibold">Reg</th>
+                  <th class="px-3 py-3 font-semibold">Type</th>
+                  <th class="px-3 py-3 font-semibold">GS</th>
+                  <th class="px-3 py-3 font-semibold">Alt</th>
+                  <th class="px-3 py-3 font-semibold">Lat</th>
+                  <th class="px-3 py-3 font-semibold">Lon</th>
+                  <th class="px-3 py-3 font-semibold">VR</th>
+                  <th class="px-3 py-3 font-semibold">Hdg</th>
+                </tr>
+              </thead>
+              <tbody id="latestBody" class="divide-y divide-slate-100/80 bg-white/70"></tbody>
+            </table>
+          </div>
         </div>
-        <div class="settings-section">
-          <h3>Schwellwerte</h3>
-          <form id="configForm" onsubmit="submitConfig(event)">
-            <label for="cfgAltitude">Höhen-Schwelle (ft)</label>
-            <input id="cfgAltitude" type="number" min="1" step="1" required />
-            <label for="cfgSpeed">Geschwindigkeits-Schwelle (kt)</label>
-            <input id="cfgSpeed" type="number" min="0" step="1" required />
-            <label for="cfgTimeout">Timeout (s)</label>
-            <input id="cfgTimeout" type="number" min="5" step="1" required />
-            <button type="submit" class="primary-button">Konfiguration speichern</button>
-          </form>
-          <div id="configMessage" class="settings-message"></div>
-        </div>
-        <div class="settings-section">
-          <h3>Orte</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th><th>Typ</th><th>Lat</th><th>Lon</th><th>Aktionen</th>
-              </tr>
-            </thead>
-            <tbody id="placesTableBody"></tbody>
-          </table>
-          <div id="placesEmpty" class="empty-state">Keine Orte hinterlegt.</div>
-        </div>
-        <div class="settings-section">
-          <h4 id="placeFormTitle">Neuen Ort hinzufügen</h4>
-          <form id="placeForm" onsubmit="submitPlace(event)">
-            <label for="placeName">Name</label>
-            <input id="placeName" type="text" required />
-            <label for="placeType">Typ</label>
-            <input id="placeType" type="text" required />
-            <label for="placeSearch">Ortssuche</label>
-            <div class="search-row">
-              <input id="placeSearch" type="text" placeholder="Adresse, Stadt oder Ort" onkeydown="handlePlaceSearchKey(event)" />
-              <button type="button" onclick="searchPlaceInOSM()">Search OSM</button>
+        <div class="settings-section rounded-3xl bg-white/90 px-6 py-6 shadow-card ring-1 ring-white/40 backdrop-blur">
+          <h3 class="text-xl font-semibold text-slate-900">Schwellwerte</h3>
+          <form id="configForm" onsubmit="submitConfig(event)" class="mt-4 space-y-4">
+            <div>
+              <label for="cfgAltitude" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Höhen-Schwelle (ft)</label>
+              <input id="cfgAltitude" type="number" min="1" step="1" required class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
             </div>
-            <div id="placeSearchStatus" class="search-status"></div>
-            <div id="placeSearchResults" class="search-results"></div>
-            <label for="placeLat">Breite (Lat)</label>
-            <input id="placeLat" type="number" step="any" min="-90" max="90" required />
-            <label for="placeLon">Länge (Lon)</label>
-            <input id="placeLon" type="number" step="any" min="-180" max="180" required />
-            <div class="button-row">
-              <button type="submit" id="placeSubmit" class="primary-button">Hinzufügen</button>
-              <button type="button" id="placeCancel" class="button-secondary" onclick="cancelPlaceEdit()">Abbrechen</button>
+            <div>
+              <label for="cfgSpeed" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Geschwindigkeits-Schwelle (kt)</label>
+              <input id="cfgSpeed" type="number" min="0" step="1" required class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
             </div>
+            <div>
+              <label for="cfgTimeout" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Offline-Timeout (Sek.)</label>
+              <input id="cfgTimeout" type="number" min="5" step="1" required class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
+            </div>
+            <button type="submit" class="inline-flex w-full items-center justify-center rounded-full bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Konfiguration speichern</button>
           </form>
-          <div id="placeFormMessage" class="settings-message"></div>
+          <p id="configMessage" class="settings-message mt-4 text-sm font-medium tracking-wide text-slate-500"></p>
+        </div>
+        <div class="settings-section rounded-3xl bg-white/90 px-6 py-6 shadow-card ring-1 ring-white/40 backdrop-blur">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 class="text-xl font-semibold text-slate-900">Orte</h3>
+              <p class="mt-1 text-sm text-slate-500">Verwalte deine eigenen Landeplätze und Events.</p>
+            </div>
+            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70" onclick="refreshPlaces()">
+              Aktualisieren
+            </button>
+          </div>
+          <div class="mt-6 overflow-hidden rounded-2xl border border-slate-100/80">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-xs uppercase tracking-[0.3em] text-slate-400">
+              <thead class="bg-slate-50/60">
+                <tr>
+                  <th class="px-3 py-3 font-semibold">Name</th>
+                  <th class="px-3 py-3 font-semibold">Typ</th>
+                  <th class="px-3 py-3 font-semibold">Lat</th>
+                  <th class="px-3 py-3 font-semibold">Lon</th>
+                  <th class="px-3 py-3 font-semibold">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="placesTableBody" class="divide-y divide-slate-100/80 bg-white/70"></tbody>
+            </table>
+          </div>
+          <p id="placesEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Orte vorhanden.</p>
+          <div class="mt-8 grid gap-4 lg:grid-cols-2">
+            <form id="placeForm" onsubmit="submitPlace(event)" class="rounded-3xl bg-white/80 px-6 py-6 shadow-inner shadow-white/40">
+              <h4 id="placeFormTitle" class="text-lg font-semibold text-slate-900">Neuen Ort hinzufügen</h4>
+              <label class="mt-4 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeName">Name</label>
+              <input id="placeName" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+              <label class="mt-4 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeType">Typ</label>
+              <input id="placeType" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+              <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeLat">Lat</label>
+                  <input id="placeLat" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                </div>
+                <div>
+                  <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeLon">Lon</label>
+                  <input id="placeLon" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                </div>
+              </div>
+              <div class="mt-5 flex flex-wrap items-center gap-3">
+                <button id="placeSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-full bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Hinzufügen</button>
+                <button id="placeCancel" type="button" class="hidden rounded-full border border-brand-red/30 bg-white/60 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red transition hover:bg-white" onclick="cancelPlaceEdit()">Abbrechen</button>
+              </div>
+              <p id="placeFormMessage" class="settings-message mt-4 text-sm font-medium tracking-wide text-slate-500"></p>
+            </form>
+            <div class="rounded-3xl bg-white/80 px-6 py-6 shadow-inner shadow-white/40">
+              <h4 class="text-lg font-semibold text-slate-900">Ort suchen</h4>
+              <div class="settings search-row mt-4 flex items-center gap-3">
+                <input id="placeSearch" type="text" placeholder="Ort suchen" class="flex-1 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-base text-slate-900 focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" onkeydown="handlePlaceSearchKey(event)" />
+                <button type="button" class="rounded-full bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition hover:bg-brand-purple/90" onclick="searchPlaceInOSM()">Suche</button>
+              </div>
+              <p id="placeSearchStatus" class="mt-3 min-h-[1.5rem] text-sm font-medium text-slate-500"></p>
+              <div id="placeSearchResults" class="settings search-results mt-4 flex flex-col gap-3"></div>
+            </div>
+          </div>
         </div>
       </div>`;
 
       container.innerHTML = html;
-      setHexStatus("");
-
-      clearPlaceSearchResults();
 
       const altitudeInput = document.getElementById("cfgAltitude");
-      if (altitudeInput) {
-        altitudeInput.value = safeConfig.altitudeThresholdFt ?? "";
-      }
       const speedInput = document.getElementById("cfgSpeed");
-      if (speedInput) {
-        speedInput.value = safeConfig.speedThresholdKt ?? "";
-      }
       const timeoutInput = document.getElementById("cfgTimeout");
-      if (timeoutInput) {
-        timeoutInput.value = safeConfig.offlineTimeoutSec ?? "";
-      }
+      if (altitudeInput) altitudeInput.value = safeConfig.altitudeThresholdFt || "";
+      if (speedInput) speedInput.value = safeConfig.speedThresholdKt || "";
+      if (timeoutInput) timeoutInput.value = safeConfig.offlineTimeoutSec || "";
 
-      const hexInput = document.getElementById("hexInput");
-      if (hexInput) {
-        hexInput.value = currentHex;
-      }
-
-      showConfigMessage("", "");
-      showPlaceMessage("", "");
-      updatePlaceFormState();
       renderPlacesTable(places);
+      updatePlaceFormState();
     }
 
     async function fetchConfig() {
@@ -866,7 +816,7 @@
 
       if (!Array.isArray(list) || list.length === 0) {
         body.innerHTML = "";
-        empty.style.display = "block";
+        empty.classList.remove("hidden");
         return;
       }
 
@@ -879,20 +829,22 @@
         const lat = formatCoordinate(place.lat);
         const lon = formatCoordinate(place.lon);
         const actions = idString
-          ? `<button type="button" class="action-btn" onclick='startEditPlace(${editId})'>Bearbeiten</button>
-             <button type="button" class="action-btn danger" onclick='deletePlace(${editId})'>Löschen</button>`
+          ? `<div class="flex gap-2">
+               <button type="button" class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-brand-purple transition hover:bg-brand-purple/20" onclick='startEditPlace(${editId})'>Bearbeiten</button>
+               <button type="button" class="rounded-full bg-rose-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-rose-600 transition hover:bg-rose-200" onclick='deletePlace(${editId})'>Löschen</button>
+             </div>`
           : "";
         return `<tr>
-          <td>${escapeHtml(name)}</td>
-          <td>${escapeHtml(type)}</td>
-          <td>${lat}</td>
-          <td>${lon}</td>
-          <td class="place-actions">${actions}</td>
+          <td class="px-3 py-3 text-sm font-medium text-slate-700">${escapeHtml(name)}</td>
+          <td class="px-3 py-3 text-sm text-slate-600">${escapeHtml(type)}</td>
+          <td class="px-3 py-3 text-sm text-slate-600">${lat}</td>
+          <td class="px-3 py-3 text-sm text-slate-600">${lon}</td>
+          <td class="px-3 py-3">${actions}</td>
         </tr>`;
       }).join("");
 
       body.innerHTML = rows;
-      empty.style.display = "none";
+      empty.classList.add("hidden");
     }
 
     function updatePlaceFormState() {
@@ -906,7 +858,7 @@
         submit.textContent = editingPlaceId ? "Speichern" : "Hinzufügen";
       }
       if (cancel) {
-        cancel.style.display = editingPlaceId ? "inline-block" : "none";
+        cancel.classList.toggle("hidden", !editingPlaceId);
       }
     }
 
@@ -1120,9 +1072,14 @@
     function updatePlaceSearchStatus(message, type = "") {
       const el = document.getElementById("placeSearchStatus");
       if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `mt-3 min-h-[1.5rem] text-sm font-medium ${color}`;
       el.textContent = message || "";
-      const normalizedType = type === "success" || type === "error" ? type : "";
-      el.className = normalizedType ? `search-status ${normalizedType}` : "search-status";
     }
 
     function renderPlaceSearchResults(list = nominatimResults) {
@@ -1136,7 +1093,10 @@
 
       const html = list.map((entry, index) => {
         if (!entry) return "";
-        const classes = index === nominatimSelectedIndex ? "search-result selected" : "search-result";
+        const isSelected = index === nominatimSelectedIndex;
+        const classes = isSelected
+          ? "rounded-2xl border border-brand-purple/40 bg-brand-purple/5 p-4 text-sm text-slate-600 shadow-inner shadow-brand-purple/10"
+          : "rounded-2xl border border-slate-200/70 bg-white/70 p-4 text-sm text-slate-600 shadow-inner shadow-white/40";
         const typeLabel = entry.typeLabel || "";
         const classLabel = entry.classLabel || "";
         const detailParts = [];
@@ -1146,13 +1106,13 @@
         if (classLabel && classLabel.toLowerCase() !== typeLabel.toLowerCase()) {
           detailParts.push(escapeHtml(classLabel));
         }
-        const detailHtml = detailParts.length ? `<small>${detailParts.join(" • ")}</small>` : "";
+        const detailHtml = detailParts.length ? `<div class="mt-1 text-xs text-slate-400">${detailParts.join(" • ")}</div>` : "";
         const coords = `${formatCoordinate(entry.lat)}, ${formatCoordinate(entry.lon)}`;
         return `<div class="${classes}">
-          <div class="search-result-title">${escapeHtml(entry.displayName || "")}</div>
-          <div class="search-result-coords">${coords}</div>
+          <div class="text-sm font-semibold text-slate-800">${escapeHtml(entry.displayName || "")}</div>
+          <div class="mt-1 text-xs font-medium uppercase tracking-[0.3em] text-slate-400">${coords}</div>
           ${detailHtml}
-          <button type="button" onclick="applyNominatimResult(${index})">Koordinaten übernehmen</button>
+          <button type="button" class="mt-3 inline-flex items-center gap-2 rounded-full bg-brand-purple px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-white transition hover:bg-brand-purple/90" onclick="applyNominatimResult(${index})">Koordinaten übernehmen</button>
         </div>`;
       }).join("");
 
@@ -1269,15 +1229,33 @@
     function showConfigMessage(message, type = "") {
       const el = document.getElementById("configMessage");
       if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `settings-message mt-4 text-sm font-medium tracking-wide ${color}`;
       el.textContent = message || "";
-      el.className = type ? `settings-message ${type}` : "settings-message";
     }
 
     function showPlaceMessage(message, type = "") {
       const el = document.getElementById("placeFormMessage");
       if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `settings-message mt-4 text-sm font-medium tracking-wide ${color}`;
       el.textContent = message || "";
-      el.className = type ? `settings-message ${type}` : "settings-message";
+    }
+
+    function createStatusCard(message) {
+      return `<div class="flex h-full items-center justify-center">
+        <div class="rounded-3xl bg-white/80 px-8 py-6 text-base font-medium text-slate-600 shadow-card backdrop-blur">${escapeHtml(message)}</div>
+      </div>`;
     }
 
     function escapeHtml(value) {
