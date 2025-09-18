@@ -196,5 +196,20 @@
       "lon": 13.408101
     },
     "id": "16"
+  },
+  {
+    "time": "2025-09-18T14:12:37.433Z",
+    "type": "takeoff",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.138,
+    "lon": 13.411,
+    "alt": 950,
+    "gs": 113,
+    "lastSeen": 1,
+    "id": "17",
+    "place": {
+      "type": "external"
+    }
   }
 ]
