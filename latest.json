@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-18T14:20:10.945Z",
+  "time": "2025-09-18T14:20:36.031Z",
   "hex": "3e0fe9",
-  "callsign": "CHX47",
+  "callsign": "no callsign",
   "reg": "D-HXFL",
-  "type": "EC45",
-  "gs": 20,
-  "alt": 75,
-  "vr": -192,
-  "hdg": 270,
-  "lat": 54.089,
-  "lon": 13.41,
-  "lastSeen": 269
+  "type": "n/a",
+  "gs": null,
+  "alt": null,
+  "vr": null,
+  "hdg": null,
+  "lat": null,
+  "lon": null,
+  "lastSeen": null
 }
