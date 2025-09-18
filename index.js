@@ -22,6 +22,63 @@ const configPath = path.join(__dirname, "config.json");
 let places = [];
 let lastEventId = 0;
 
+const stdinInterface = readline.createInterface({ input: process.stdin });
+const stdinLineQueue = [];
+const stdinWaiters = [];
+let stdinClosed = false;
+
+stdinInterface.on("line", line => {
+  const trimmed = typeof line === "string" ? line.trim() : "";
+  if (!trimmed) {
+    return;
+  }
+
+  if (stdinWaiters.length > 0) {
+    const waiter = stdinWaiters.shift();
+    waiter.resolve(trimmed);
+  } else {
+    stdinLineQueue.push(trimmed);
+  }
+});
+
+stdinInterface.on("close", () => {
+  stdinClosed = true;
+  while (stdinWaiters.length > 0) {
+    const waiter = stdinWaiters.shift();
+    waiter.reject(new Error("stdin geschlossen"));
+  }
+});
+
+function getNextStdinLine() {
+  return new Promise((resolve, reject) => {
+    if (stdinLineQueue.length > 0) {
+      resolve(stdinLineQueue.shift());
+      return;
+    }
+
+    if (stdinClosed) {
+      reject(new Error("stdin geschlossen"));
+      return;
+    }
+
+    stdinWaiters.push({ resolve, reject });
+  });
+}
+
+async function waitForDeployResponse() {
+  while (true) {
+    const line = await getNextStdinLine();
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch (err) {
+      console.error("⚠️ Ungültige JSON-Zeile von stdin:", err.message);
+    }
+  }
+}
+
 const ADSB_BASE_URL = "https://globe.adsbexchange.com/?icao=";
 const NAVIGATION_WAIT_UNTIL = "domcontentloaded";
 const NAVIGATION_TIMEOUT_MS = 60000;
@@ -1444,6 +1501,48 @@ function sendError(res, statusCode, message) {
   sendJSON(res, statusCode, { error: message });
 }
 
+async function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let aborted = false;
+
+    const abort = (err) => {
+      if (aborted) return;
+      aborted = true;
+      reject(err);
+    };
+
+    req.setEncoding("utf8");
+
+    req.on("aborted", () => {
+      const err = new Error("Request abgebrochen.");
+      err.statusCode = 400;
+      abort(err);
+    });
+
+    req.on("data", chunk => {
+      if (aborted) return;
+      body += chunk;
+      if (body.length > 1e6) {
+        const err = new Error("Payload zu groß.");
+        err.statusCode = 413;
+        abort(err);
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      if (aborted) return;
+      resolve(body.trim());
+    });
+
+    req.on("error", err => {
+      if (aborted) return;
+      reject(err);
+    });
+  });
+}
+
 async function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -1539,6 +1638,57 @@ async function handleSetRequest(res, hexParam) {
 
 async function handleRequest(req, res) {
   const q = url.parse(req.url, true);
+
+  if (q.pathname === "/refresh") {
+    let rawBody = "";
+    try {
+      rawBody = await readRawBody(req);
+    } catch (err) {
+      console.error("❌ Lesen des Refresh-Bodys fehlgeschlagen:", err.message);
+      const signatureHeader = req.headers?.["signature"];
+      const signatureValue = Array.isArray(signatureHeader)
+        ? signatureHeader.join(",")
+        : typeof signatureHeader === "string"
+          ? signatureHeader
+          : "";
+      console.log(`repl.deploy${rawBody}${signatureValue}`);
+      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Internal Server Error");
+      console.log("repl.deploy-success");
+      return;
+    }
+
+    const signatureHeader = req.headers?.["signature"];
+    const signatureValue = Array.isArray(signatureHeader)
+      ? signatureHeader.join(",")
+      : typeof signatureHeader === "string"
+        ? signatureHeader
+        : "";
+
+    console.log(`repl.deploy${rawBody}${signatureValue}`);
+
+    let responseInstruction;
+    try {
+      responseInstruction = await waitForDeployResponse();
+    } catch (err) {
+      console.error("❌ Lesen der Antwortinstruktion fehlgeschlagen:", err.message);
+      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Internal Server Error");
+      console.log("repl.deploy-success");
+      return;
+    }
+
+    const statusCodeRaw = responseInstruction.status;
+    const statusCode = Number.parseInt(statusCodeRaw, 10);
+    const safeStatus = Number.isInteger(statusCode) ? statusCode : 200;
+    const body = responseInstruction.body;
+    const responseBody = body === undefined || body === null ? "" : String(body);
+
+    res.writeHead(safeStatus, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(responseBody);
+    console.log("repl.deploy-success");
+    return;
+  }
 
   if (q.pathname === "/latest") {
     sendJSON(res, 200, latestData);
