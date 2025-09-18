@@ -1640,53 +1640,10 @@ async function handleRequest(req, res) {
   const q = url.parse(req.url, true);
 
   if (q.pathname === "/refresh") {
-    let rawBody = "";
-    try {
-      rawBody = await readRawBody(req);
-    } catch (err) {
-      console.error("❌ Lesen des Refresh-Bodys fehlgeschlagen:", err.message);
-      const signatureHeader = req.headers?.["signature"];
-      const signatureValue = Array.isArray(signatureHeader)
-        ? signatureHeader.join(",")
-        : typeof signatureHeader === "string"
-          ? signatureHeader
-          : "";
-      console.log(`repl.deploy${rawBody}${signatureValue}`);
-      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Internal Server Error");
-      console.log("repl.deploy-success");
-      return;
-    }
-
-    const signatureHeader = req.headers?.["signature"];
-    const signatureValue = Array.isArray(signatureHeader)
-      ? signatureHeader.join(",")
-      : typeof signatureHeader === "string"
-        ? signatureHeader
-        : "";
-
-    console.log(`repl.deploy${rawBody}${signatureValue}`);
-
-    let responseInstruction;
-    try {
-      responseInstruction = await waitForDeployResponse();
-    } catch (err) {
-      console.error("❌ Lesen der Antwortinstruktion fehlgeschlagen:", err.message);
-      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Internal Server Error");
-      console.log("repl.deploy-success");
-      return;
-    }
-
-    const statusCodeRaw = responseInstruction.status;
-    const statusCode = Number.parseInt(statusCodeRaw, 10);
-    const safeStatus = Number.isInteger(statusCode) ? statusCode : 200;
-    const body = responseInstruction.body;
-    const responseBody = body === undefined || body === null ? "" : String(body);
-
-    res.writeHead(safeStatus, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end(responseBody);
-    console.log("repl.deploy-success");
+    console.log("repl.deploy<id=refresh>");
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Refresh triggered, restarting process...");
+    process.exit(0);
     return;
   }
 
