@@ -1540,6 +1540,18 @@ async function handleSetRequest(res, hexParam) {
 async function handleRequest(req, res) {
   const q = url.parse(req.url, true);
 
+  if (q.pathname === "/refresh") {
+    console.log("♻️ Refresh-Webhook von Repldeploy empfangen");
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8"
+    });
+    res.end("Refresh triggered, restarting process...");
+    setImmediate(() => {
+      process.exit(0);
+    });
+    return;
+  }
+
   if (q.pathname === "/latest") {
     sendJSON(res, 200, latestData);
     return;
