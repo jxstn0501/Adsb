@@ -31,6 +31,9 @@ const PUPPETEER_PROTOCOL_TIMEOUT_MS = 120000;
 const PAGE_OPERATION_TIMEOUT_CODE = "PAGE_OPERATION_TIMEOUT";
 let pageRecoveryInProgress = false;
 
+const MAX_CONSECUTIVE_TIMEOUTS_BEFORE_BROWSER_RESTART = 3;
+let consecutiveTimeoutCount = 0;
+
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
@@ -619,13 +622,14 @@ async function runPageOperation(operation, { timeoutMs = PAGE_OPERATION_TIMEOUT_
   }
 }
 
-async function navigateToTarget({ hex = targetHex, waitUntil = NAVIGATION_WAIT_UNTIL, timeoutMs = NAVIGATION_TIMEOUT_MS } = {}) {
-  if (!page) {
+async function navigateToTarget({ hex = targetHex, waitUntil = NAVIGATION_WAIT_UNTIL, timeoutMs = NAVIGATION_TIMEOUT_MS, browserPage = null } = {}) {
+  const activePage = browserPage ?? page;
+  if (!activePage) {
     throw new Error("Browserseite ist nicht initialisiert.");
   }
 
   const url = getTargetUrl(hex);
-  await page.goto(url, { waitUntil, timeout: timeoutMs });
+  await activePage.goto(url, { waitUntil, timeout: timeoutMs });
   return url;
 }
 
@@ -672,11 +676,22 @@ async function rebuildPage(reason = "timeout") {
       }
     }
 
-    const newPage = await browser.newPage();
-    applyPageDefaults(newPage);
-    page = newPage;
-
-    await navigateToTarget();
+    let newPage;
+    try {
+      newPage = await browser.newPage();
+      applyPageDefaults(newPage);
+      await navigateToTarget({ browserPage: newPage });
+      page = newPage;
+    } catch (err) {
+      if (newPage) {
+        try {
+          await newPage.close({ runBeforeUnload: true });
+        } catch (closeErr) {
+          console.warn("⚠️ Neue Browserseite konnte nach Fehler nicht geschlossen werden:", closeErr.message);
+        }
+      }
+      throw err;
+    }
   });
 
   console.log(`🔄 Browserseite neu initialisiert (${reason}):`, targetHex);
@@ -686,17 +701,43 @@ async function rebuildPage(reason = "timeout") {
   }
 }
 
-async function attemptPageRecovery(reason = "timeout") {
+async function attemptPageRecovery(reason = "timeout", { forceBrowserRestart = false } = {}) {
   if (pageRecoveryInProgress) {
     return;
   }
 
+  const restartBrowserInstance = async (logMessage) => {
+    if (logMessage) {
+      console.warn(logMessage);
+    }
+
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.warn("⚠️ Browser konnte nicht geschlossen werden:", closeErr.message);
+      }
+    }
+
+    browser = null;
+    page = null;
+    consecutiveTimeoutCount = 0;
+
+    await startBrowser();
+  };
+
   pageRecoveryInProgress = true;
   try {
+    if (forceBrowserRestart) {
+      await restartBrowserInstance(`♻️ Browser-Neustart nach Anforderung (${reason}).`);
+      return;
+    }
+
     await rebuildPage(reason);
   } catch (err) {
     const message = typeof err?.message === "string" ? err.message : String(err);
     console.error("❌ Wiederherstellung der Seite fehlgeschlagen:", message);
+    await restartBrowserInstance(`♻️ Browser-Neustart nach Fehler (${reason}).`);
   } finally {
     pageRecoveryInProgress = false;
   }
@@ -1096,11 +1137,28 @@ async function runScrapeCycle() {
 
   try {
     await runWithPage(() => scrapeOnce());
+    if (consecutiveTimeoutCount !== 0) {
+      consecutiveTimeoutCount = 0;
+    }
   } catch (err) {
     const message = typeof err?.message === "string" ? err.message : String(err);
     console.error("❌ Scrape-Fehler:", message);
     if (isTimeoutLikeError(err)) {
-      await attemptPageRecovery("scrape-timeout");
+      consecutiveTimeoutCount += 1;
+      console.warn(`⏱️ Timeout beim Scrape (${consecutiveTimeoutCount}/${MAX_CONSECUTIVE_TIMEOUTS_BEFORE_BROWSER_RESTART}).`);
+      const shouldRestartBrowser = consecutiveTimeoutCount >= MAX_CONSECUTIVE_TIMEOUTS_BEFORE_BROWSER_RESTART;
+      if (shouldRestartBrowser) {
+        console.warn("♻️ Zu viele aufeinanderfolgende Timeouts. Browser wird komplett neu gestartet.");
+      }
+      await attemptPageRecovery(
+        shouldRestartBrowser ? "scrape-timeout-threshold" : "scrape-timeout",
+        { forceBrowserRestart: shouldRestartBrowser }
+      );
+      if (shouldRestartBrowser) {
+        consecutiveTimeoutCount = 0;
+      }
+    } else {
+      consecutiveTimeoutCount = 0;
     }
   } finally {
     if (scrapeLoopActive) {
