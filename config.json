@@ -2,5 +2,5 @@
   "altitudeThresholdFt": 300,
   "speedThresholdKt": 40,
   "offlineTimeoutSec": 60,
-  "placeMatchRadiusMeters": 500
+  "placeMatchRadiusMeters": 800
 }
