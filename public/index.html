@@ -192,12 +192,16 @@
     let currentConfigCache = null;
     let currentPlaces = [];
     let currentEvents = [];
+    let currentAircraft = [];
     let editingPlaceId = null;
+    let editingAircraftHex = null;
     let nominatimResults = [];
     let nominatimSelectedIndex = null;
     let nominatimSearchToken = 0;
     let activeView = "map";
     let activeEventMap = null;
+    let currentEventGroups = [];
+    let activeEventGroupKey = null;
     let cachedLogOverview = [];
     let activeLogHex = null;
     const navInactiveButtonClasses = ["text-slate-500", "bg-transparent", "shadow-none", "scale-100"];
@@ -255,6 +259,33 @@
         return "—";
       }
       return suffix ? `${text} ${suffix}` : text;
+    }
+
+    function normalizeHex(hex) {
+      if (typeof hex !== "string") return "";
+      return hex.trim().toLowerCase();
+    }
+
+    function getAircraftEntry(hex) {
+      const normalized = normalizeHex(hex);
+      if (!normalized || !Array.isArray(currentAircraft)) {
+        return null;
+      }
+      return currentAircraft.find(item => item && normalizeHex(item.hex) === normalized) || null;
+    }
+
+    function getAircraftDisplayName(hex, fallback = "") {
+      const entry = getAircraftEntry(hex);
+      if (entry && typeof entry.name === "string" && entry.name.trim()) {
+        return entry.name.trim();
+      }
+      if (fallback && typeof fallback === "string" && fallback.trim()) {
+        return fallback.trim();
+      }
+      if (hex && typeof hex === "string") {
+        return hex.trim().toUpperCase();
+      }
+      return "Unbekanntes Flugzeug";
     }
 
     function cleanupEventMap() {
@@ -611,135 +642,29 @@
       container.innerHTML = createStatusCard("Lade Events...");
 
       try {
-        const response = await fetch("/events");
-        if (!response.ok) {
-          throw new Error(`Serverantwort ${response.status}`);
-        }
+        const [eventsData, aircraftData] = await Promise.all([
+          fetchEventsList(),
+          fetchAircraftList().catch(err => {
+            console.warn("[Events] Flugzeugliste konnte nicht geladen werden:", err);
+            return currentAircraft;
+          })
+        ]);
 
-        const data = await response.json();
-        const events = Array.isArray(data)
-          ? data.filter(item => {
+        const events = Array.isArray(eventsData)
+          ? eventsData.filter(item => {
               const type = typeof item?.type === "string" ? item.type.toLowerCase() : "";
               return type === "takeoff" || type === "landing";
             })
           : [];
 
-        if (events.length === 0) {
-          container.innerHTML = `
-            <section class="view-panel mx-auto w-full max-w-5xl space-y-6">
-              <div class="flex flex-col gap-2">
-                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
-                <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Flugbewegungen</h2>
-                <p class="text-sm text-slate-500">Noch wurden keine Takeoff- oder Landing-Events erkannt.</p>
-              </div>
-              ${createEmptyCard("Noch keine Events erkannt")}
-            </section>`;
-          return;
+        currentEvents = events;
+        if (Array.isArray(aircraftData)) {
+          currentAircraft = aircraftData;
         }
 
-        const cards = events.map(event => {
-          const typeRaw = typeof event.type === "string" ? event.type : "";
-          const type = typeRaw.toLowerCase();
-          const isLanding = type === "landing";
-          const typeLabel = typeRaw ? typeRaw.toUpperCase() : "EVENT";
-
-          const callsign = escapeHtml(event.callsign || event.hex || "—");
-          const altitude = escapeHtml(formatMetricValue(event.alt, "ft"));
-          const speed = escapeHtml(formatMetricValue(event.gs, "kt"));
-          const time = escapeHtml(formatDateTime(event.time));
-
-          const latNum = Number(event.lat);
-          const lonNum = Number(event.lon);
-          const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
-          const latFixed = hasCoords ? latNum.toFixed(6) : null;
-          const lonFixed = hasCoords ? lonNum.toFixed(6) : null;
-          const positionLabel = hasCoords
-            ? `${latFixed}°, ${lonFixed}°`
-            : `${event.lat ?? "—"}, ${event.lon ?? "—"}`;
-          const safePositionLabel = escapeHtml(positionLabel);
-
-          const place = formatEventPlace(event.place, type);
-
-          const eventPayload = {
-            time: event.time ?? null,
-            type: typeRaw || null,
-            hex: event.hex ?? null,
-            callsign: event.callsign ?? null,
-            lat: hasCoords ? Number(latNum.toFixed(6)) : null,
-            lon: hasCoords ? Number(lonNum.toFixed(6)) : null,
-            alt: event.alt ?? null,
-            gs: event.gs ?? null,
-            place: event.place ?? null
-          };
-          const encodedEvent = encodeURIComponent(JSON.stringify(eventPayload));
-
-          const iconBackground = isLanding
-            ? "bg-emerald-500 text-white shadow-[0_10px_20px_rgba(16,185,129,0.35)]"
-            : "bg-brand-red text-white shadow-[0_10px_20px_rgba(217,48,48,0.35)]";
-          const iconSvg = isLanding
-            ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21l4-4h-3V5h-2v12H8l4 4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 4.5h14" /></svg>'
-            : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l-4 4h3v10h2V7h3l-4-4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 19.5h14" /></svg>';
-
-          const buttonDisabled = !hasCoords;
-          const buttonAttributes = buttonDisabled
-            ? 'type="button" disabled'
-            : `type="button" onclick="openEventFromEncoded('${encodedEvent}')"`;
-
-          const buttonClasses = buttonDisabled
-            ? "inline-flex items-center justify-between gap-2 rounded-2xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400"
-            : "inline-flex items-center justify-between gap-2 rounded-2xl bg-brand-purple px-4 py-2 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50";
-
-          return `
-            <article class="group flex h-full flex-col gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_25px_45px_rgba(111,93,247,0.2)]">
-              <div class="flex items-start justify-between gap-3">
-                <div class="flex items-start gap-3">
-                  <span class="flex h-11 w-11 items-center justify-center rounded-xl text-white transition-transform duration-300 group-hover:scale-110 ${iconBackground}">
-                    ${iconSvg}
-                  </span>
-                  <div class="space-y-1">
-                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(typeLabel)}</p>
-                    <h3 class="text-xl font-semibold text-brand-ink">${callsign}</h3>
-                    <p class="text-xs text-slate-500">${place}</p>
-                  </div>
-                </div>
-                <span class="rounded-full bg-sky-100 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-sky-600">${time}</span>
-              </div>
-              <div class="grid gap-2 rounded-2xl bg-brand-frost/70 p-3 text-sm text-slate-500">
-                <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Altitude</span>
-                  <span class="font-semibold text-brand-ink">${altitude}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Speed</span>
-                  <span class="font-semibold text-brand-ink">${speed}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Position</span>
-                  <span class="truncate pl-3 text-right font-semibold text-brand-ink">${safePositionLabel}</span>
-                </div>
-              </div>
-              <div class="flex items-center justify-between">
-                <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Mehr Details</p>
-                <button ${buttonAttributes} class="${buttonClasses} ${buttonDisabled ? "cursor-not-allowed" : ""}">
-                  <span>Eventdetails anzeigen</span>
-                  <span aria-hidden="true">→</span>
-                </button>
-              </div>
-            </article>`;
-        }).join("");
-
-        const grid = `<section class="view-panel mx-auto w-full max-w-6xl space-y-6 pb-8">
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
-              <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Bewegungen</h2>
-              <p class="text-sm text-slate-500">Takeoff- und Landing-Events deines gewählten Flugzeugs.</p>
-            </div>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2">${cards}</div>
-        </section>`;
-
-        container.innerHTML = grid;
+        currentEventGroups = groupEventsByAircraft(events);
+        activeEventGroupKey = null;
+        renderEventsOverview();
       } catch (err) {
         console.error("[Events] Liste konnte nicht geladen werden:", err);
         const message = err && err.message ? err.message : String(err);
@@ -748,6 +673,321 @@
             ${createEmptyCard(`Fehler beim Laden der Events (${escapeHtml(message)})`)}
           </section>`;
       }
+    }
+
+    function groupEventsByAircraft(events) {
+      if (!Array.isArray(events) || events.length === 0) {
+        return [];
+      }
+
+      const map = new Map();
+
+      events.forEach((event, index) => {
+        if (!event || typeof event !== "object") {
+          return;
+        }
+
+        const typeRaw = typeof event.type === "string" ? event.type.toLowerCase() : "";
+        if (typeRaw !== "takeoff" && typeRaw !== "landing") {
+          return;
+        }
+
+        const hex = event.hex ? normalizeHex(event.hex) : "";
+        const callsign = typeof event.callsign === "string" ? event.callsign.trim() : "";
+        const id = event.id !== undefined && event.id !== null ? String(event.id) : "";
+
+        let key = "";
+        if (hex) {
+          key = `hex:${hex}`;
+        } else if (callsign) {
+          key = `callsign:${callsign.toLowerCase()}`;
+        } else if (id) {
+          key = `id:${id}`;
+        } else {
+          key = `idx:${index}`;
+        }
+
+        if (!map.has(key)) {
+          map.set(key, { key, hex, callsign, events: [] });
+        }
+
+        map.get(key).events.push(event);
+      });
+
+      return Array.from(map.values());
+    }
+
+    function renderEventsOverview() {
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      if (!Array.isArray(currentEventGroups) || currentEventGroups.length === 0) {
+        container.innerHTML = `
+          <section class="view-panel mx-auto w-full max-w-5xl space-y-6">
+            <div class="flex flex-col gap-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
+              <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Flugbewegungen</h2>
+              <p class="text-sm text-slate-500">Noch wurden keine Takeoff- oder Landing-Events erkannt.</p>
+            </div>
+            ${createEmptyCard("Noch keine Events erkannt")}
+          </section>`;
+        return;
+      }
+
+      const sortedGroups = [...currentEventGroups].sort((a, b) => {
+        const latestA = getLatestEventTime(a.events);
+        const latestB = getLatestEventTime(b.events);
+        if (latestA && latestB) return latestB - latestA;
+        if (latestA) return -1;
+        if (latestB) return 1;
+        return 0;
+      });
+
+      const cards = sortedGroups.map(group => {
+        const events = getSortedEventsForGroup(group.events);
+        const latest = events[0] || null;
+        const takeoffCount = events.filter(event => typeof event?.type === "string" && event.type.toLowerCase() === "takeoff").length;
+        const landingCount = events.filter(event => typeof event?.type === "string" && event.type.toLowerCase() === "landing").length;
+        const displayName = getAircraftDisplayName(group.hex, group.callsign || group.hex || "");
+        const hexLabel = group.hex ? group.hex.toUpperCase() : "—";
+        const callsignLabel = group.callsign && group.callsign.toLowerCase() !== group.hex
+          ? group.callsign
+          : "";
+        const timeLabel = latest ? formatDateTime(latest.time) : "—";
+        const safeKey = encodeURIComponent(group.key);
+
+        return `<article class="group rounded-3xl border border-slate-100/80 bg-white/80 p-4 shadow-inner shadow-white/50 transition duration-300 hover:border-brand-purple/40 hover:shadow-brand-purple/10">
+            <div class="flex flex-col gap-4">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div class="space-y-1">
+                  <h3 class="text-xl font-semibold text-brand-ink">${escapeHtml(displayName)}</h3>
+                  <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">HEX ${escapeHtml(hexLabel)}</p>
+                  ${callsignLabel ? `<p class="text-xs text-slate-500">Callsign: ${escapeHtml(callsignLabel)}</p>` : ""}
+                </div>
+                <div class="flex flex-col items-start sm:items-end">
+                  <span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Letztes Event</span>
+                  <span class="text-sm font-semibold text-brand-ink">${escapeHtml(timeLabel)}</span>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+                <span class="rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600">Takeoffs: <span class="text-brand-ink">${takeoffCount}</span></span>
+                <span class="rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600">Landings: <span class="text-brand-ink">${landingCount}</span></span>
+              </div>
+              <div class="flex justify-end">
+                <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50" onclick="openEventsDetail('${safeKey}')">
+                  Events ansehen
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
+          </article>`;
+      }).join("");
+
+      container.innerHTML = `
+        <section class="view-panel mx-auto w-full max-w-6xl space-y-6 pb-8">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
+              <h2 class="text-3xl font-semibold text-brand-ink">Flugzeuge & Bewegungen</h2>
+              <p class="text-sm text-slate-500">Wähle ein Flugzeug, um alle zugehörigen Events einzusehen.</p>
+            </div>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">${cards}</div>
+        </section>`;
+    }
+
+    function getSortedEventsForGroup(events) {
+      if (!Array.isArray(events)) {
+        return [];
+      }
+      return [...events].sort((a, b) => {
+        const timeA = Date.parse(a && a.time ? a.time : 0);
+        const timeB = Date.parse(b && b.time ? b.time : 0);
+        const invalidA = Number.isNaN(timeA);
+        const invalidB = Number.isNaN(timeB);
+        if (invalidA && invalidB) return 0;
+        if (invalidA) return 1;
+        if (invalidB) return -1;
+        return timeB - timeA;
+      });
+    }
+
+    function getLatestEventTime(events) {
+      const sorted = getSortedEventsForGroup(events);
+      if (sorted.length === 0) {
+        return null;
+      }
+      const timestamp = Date.parse(sorted[0].time || 0);
+      return Number.isNaN(timestamp) ? null : timestamp;
+    }
+
+    function openEventsDetail(encodedKey) {
+      let key = "";
+      try {
+        key = decodeURIComponent(encodedKey || "");
+      } catch (err) {
+        console.warn("[Events] Ungültiger Schlüssel:", err);
+        return;
+      }
+      if (!key) return;
+
+      activeEventGroupKey = key;
+      renderEventsDetail();
+    }
+
+    function returnToEventsOverview() {
+      activeEventGroupKey = null;
+      renderEventsOverview();
+    }
+
+    function renderEventsDetail() {
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      const group = Array.isArray(currentEventGroups)
+        ? currentEventGroups.find(entry => entry && entry.key === activeEventGroupKey)
+        : null;
+
+      if (!group) {
+        container.innerHTML = `
+          <section class="view-panel mx-auto w-full max-w-4xl space-y-6 p-4">
+            ${createEmptyCard("Flugzeug nicht gefunden")}
+          </section>`;
+        return;
+      }
+
+      const events = getSortedEventsForGroup(group.events);
+      const displayName = getAircraftDisplayName(group.hex, group.callsign || group.hex || "");
+      const hexLabel = group.hex ? group.hex.toUpperCase() : "—";
+      const latest = events[0] || null;
+      const takeoffCount = events.filter(event => typeof event?.type === "string" && event.type.toLowerCase() === "takeoff").length;
+      const landingCount = events.filter(event => typeof event?.type === "string" && event.type.toLowerCase() === "landing").length;
+      const latestTime = latest ? formatDateTime(latest.time) : "—";
+      const cards = events.length > 0
+        ? events.map(buildEventCardHtml).join("")
+        : createEmptyCard("Keine Events für dieses Flugzeug.");
+
+      container.innerHTML = `
+        <section class="view-panel mx-auto w-full max-w-5xl space-y-6 pb-10">
+          <div class="flex flex-col gap-4">
+            <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center gap-3">
+                <button type="button" onclick="returnToEventsOverview()" class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-brand-purple/20 bg-white text-brand-purple shadow-sm transition-transform duration-300 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/60" aria-label="Zurück zur Übersicht">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
+                  <h2 class="text-3xl font-semibold text-brand-ink">${escapeHtml(displayName)}</h2>
+                  <p class="text-sm text-slate-500">HEX ${escapeHtml(hexLabel)}</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Letztes Event</p>
+                <p class="text-sm font-semibold text-brand-ink">${escapeHtml(latestTime)}</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+              <span class="rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600">Takeoffs: <span class="text-brand-ink">${takeoffCount}</span></span>
+              <span class="rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600">Landings: <span class="text-brand-ink">${landingCount}</span></span>
+            </div>
+          </div>
+          <div class="space-y-4">${cards}</div>
+        </section>`;
+    }
+
+    function buildEventCardHtml(event) {
+      if (!event) return "";
+
+      const typeRaw = typeof event.type === "string" ? event.type : "";
+      const type = typeRaw.toLowerCase();
+      const isLanding = type === "landing";
+      const typeLabel = typeRaw ? typeRaw.toUpperCase() : "EVENT";
+
+      const callsign = escapeHtml(event.callsign || event.hex || "—");
+      const altitude = escapeHtml(formatMetricValue(event.alt, "ft"));
+      const speed = escapeHtml(formatMetricValue(event.gs, "kt"));
+      const time = escapeHtml(formatDateTime(event.time));
+
+      const latNum = Number(event.lat);
+      const lonNum = Number(event.lon);
+      const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+      const latFixed = hasCoords ? latNum.toFixed(6) : null;
+      const lonFixed = hasCoords ? lonNum.toFixed(6) : null;
+      const positionLabel = hasCoords
+        ? `${latFixed}°, ${lonFixed}°`
+        : `${event.lat ?? "—"}, ${event.lon ?? "—"}`;
+      const safePositionLabel = escapeHtml(positionLabel);
+
+      const place = formatEventPlace(event.place, type);
+
+      const eventPayload = {
+        time: event.time ?? null,
+        type: typeRaw || null,
+        hex: event.hex ?? null,
+        callsign: event.callsign ?? null,
+        lat: hasCoords ? Number(latNum.toFixed(6)) : null,
+        lon: hasCoords ? Number(lonNum.toFixed(6)) : null,
+        alt: event.alt ?? null,
+        gs: event.gs ?? null,
+        place: event.place ?? null
+      };
+      const encodedEvent = encodeURIComponent(JSON.stringify(eventPayload));
+
+      const iconBackground = isLanding
+        ? "bg-emerald-500 text-white shadow-[0_10px_20px_rgba(16,185,129,0.35)]"
+        : "bg-brand-red text-white shadow-[0_10px_20px_rgba(217,48,48,0.35)]";
+      const iconSvg = isLanding
+        ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21l4-4h-3V5h-2v12H8l4 4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 4.5h14" /></svg>'
+        : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l-4 4h3v10h2V7h3l-4-4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 19.5h14" /></svg>';
+
+      const buttonDisabled = !hasCoords;
+      const buttonAttributes = buttonDisabled
+        ? 'type="button" disabled'
+        : `type="button" onclick="openEventFromEncoded('${encodedEvent}')"`;
+
+      const buttonClasses = buttonDisabled
+        ? "inline-flex items-center justify-between gap-2 rounded-2xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400"
+        : "inline-flex items-center justify-between gap-2 rounded-2xl bg-brand-purple px-4 py-2 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50";
+
+      return `
+        <article class="group flex h-full flex-col gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_25px_45px_rgba(111,93,247,0.2)]">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start gap-3">
+              <span class="flex h-11 w-11 items-center justify-center rounded-xl text-white transition-transform duration-300 group-hover:scale-110 ${iconBackground}">
+                ${iconSvg}
+              </span>
+              <div class="space-y-1">
+                <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(typeLabel)}</p>
+                <h3 class="text-xl font-semibold text-brand-ink">${callsign}</h3>
+                <p class="text-xs text-slate-500">${place}</p>
+              </div>
+            </div>
+            <span class="rounded-full bg-sky-100 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-sky-600">${time}</span>
+          </div>
+          <div class="grid gap-2 rounded-2xl bg-brand-frost/70 p-3 text-sm text-slate-500">
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Altitude</span>
+              <span class="font-semibold text-brand-ink">${altitude}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Speed</span>
+              <span class="font-semibold text-brand-ink">${speed}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Position</span>
+              <span class="truncate pl-3 text-right font-semibold text-brand-ink">${safePositionLabel}</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between">
+            <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Mehr Details</p>
+            <button ${buttonAttributes} class="${buttonClasses} ${buttonDisabled ? "cursor-not-allowed" : ""}">
+              <span>Eventdetails anzeigen</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </article>`;
     }
 
     function getFallbackLocationLabel(eventType) {
@@ -1052,16 +1292,54 @@
 
     async function applyHex() {
       const input = document.getElementById("hexInput");
-      const hex = input ? input.value.trim() : "";
+      const nameInput = document.getElementById("hexNameInput");
+      const rawHex = input ? input.value.trim() : "";
+      const hex = normalizeHex(rawHex);
 
       if (!hex) {
         setHexStatus("Bitte eine ICAO Hex eingeben.", "error");
         return;
       }
 
+      const existingAircraft = getAircraftEntry(hex);
+      const desiredName = nameInput ? nameInput.value.trim() : "";
+
+      if (!existingAircraft && !desiredName) {
+        setHexStatus("Bitte einen Namen für das neue Flugzeug eingeben.", "error");
+        if (nameInput) nameInput.focus();
+        return;
+      }
+
       setHexStatus("Sende Anfrage...");
 
       try {
+        if (!existingAircraft && desiredName) {
+          const resAircraft = await fetch(`/aircraft/${encodeURIComponent(hex)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: desiredName })
+          });
+          const aircraftPayload = await resAircraft.json().catch(() => ({}));
+          if (!resAircraft.ok) {
+            const message = aircraftPayload && aircraftPayload.error
+              ? aircraftPayload.error
+              : `Serverantwort ${resAircraft.status}`;
+            throw new Error(message);
+          }
+
+          const savedHex = normalizeHex(aircraftPayload && aircraftPayload.hex ? aircraftPayload.hex : hex);
+          const savedName = aircraftPayload && typeof aircraftPayload.name === "string" && aircraftPayload.name.trim()
+            ? aircraftPayload.name.trim()
+            : desiredName;
+
+          currentAircraft = Array.isArray(currentAircraft) ? currentAircraft : [];
+          currentAircraft = currentAircraft.filter(entry => normalizeHex(entry && entry.hex) !== savedHex);
+          currentAircraft.push({ ...aircraftPayload, hex: savedHex, name: savedName });
+          renderAircraftList(currentAircraft);
+          updateAircraftFormState();
+          renderHexHistoryDropdown();
+        }
+
         const response = await fetch(`/set?hex=${encodeURIComponent(hex)}`);
         const contentType = response.headers.get("content-type") || "";
         let payload = null;
@@ -1082,10 +1360,13 @@
 
         setCurrentHex(hex);
         const latest = await updateLatest();
-        const storedCallsign = (payload && payload.callsign)
+        const aircraftName = getAircraftEntry(hex)?.name || "";
+        const storedLabel = (payload && payload.name)
+          || aircraftName
+          || (payload && payload.callsign)
           || (latest && latest.callsign)
           || "";
-        storeHexHistoryEntry(hex, storedCallsign);
+        storeHexHistoryEntry(hex, storedLabel);
 
         const defaultMessage = `Neues Ziel gesetzt: ${hex}`;
         const responseMessage = payload && typeof payload === "object"
@@ -1093,6 +1374,7 @@
           : defaultMessage;
 
         setHexStatus(responseMessage, "success");
+        handleHexInputChange();
       } catch (err) {
         console.error("[Settings] Fehler beim Setzen des Flugzeugs:", err);
         const message = err && err.message ? err.message : "Flugzeug konnte nicht gesetzt werden.";
@@ -1166,16 +1448,19 @@
       }
 
       try {
-        const [configData, placesData, eventsData] = await Promise.all([
+        const [configData, placesData, eventsData, aircraftData] = await Promise.all([
           fetchConfig(),
           fetchPlaces(),
-          fetchEventsList()
+          fetchEventsList(),
+          fetchAircraftList()
         ]);
         currentConfigCache = configData;
         currentPlaces = Array.isArray(placesData) ? placesData : [];
         currentEvents = Array.isArray(eventsData) ? eventsData : [];
+        currentAircraft = Array.isArray(aircraftData) ? aircraftData : [];
         editingPlaceId = null;
-        renderSettingsView(currentConfigCache, currentPlaces, currentEvents);
+        editingAircraftHex = null;
+        renderSettingsView(currentConfigCache, currentPlaces, currentEvents, currentAircraft);
         void updateLatest();
         settingsInterval = setInterval(() => { void updateLatest(); }, 3000);
       } catch (err) {
@@ -1187,7 +1472,7 @@
       }
     }
 
-    function renderSettingsView(config, places, events = []) {
+    function renderSettingsView(config, places, events = [], aircraftList = []) {
       const container = document.getElementById("content");
       if (!container) return;
 
@@ -1204,6 +1489,12 @@
               <label for="hexInput" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">ICAO Hex</label>
               <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
             </div>
+            <p id="hexNameInfo" class="hidden text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"></p>
+            <div id="hexNameWrapper" class="hidden">
+              <label for="hexNameInput" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Name des Flugzeugs</label>
+              <input id="hexNameInput" type="text" placeholder="z. B. Rettungshubschrauber" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
+              <p class="mt-2 text-xs text-slate-500">Dieser Name wird für die Übersicht gespeichert.</p>
+            </div>
             <div id="hexHistoryWrapper" class="hidden space-y-2">
               <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="hexHistorySelect">Gespeicherte Hex</label>
               <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1214,6 +1505,40 @@
             <button class="inline-flex w-full items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" onclick="applyHex()">Flugzeug setzen</button>
             <p id="hexStatus" class="min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
           </div>
+        </section>
+        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+          <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Flottenübersicht</span>
+              <h3 class="text-xl font-semibold text-slate-900">Flugzeuge verwalten</h3>
+              <p class="text-sm text-slate-500">Benenne gespeicherte Hex-Codes um und behalte den Überblick.</p>
+            </div>
+            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshAircraftList()">
+              Aktualisieren
+            </button>
+          </div>
+          <div id="aircraftList" class="mt-6 space-y-3"></div>
+          <p id="aircraftEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Flugzeuge gespeichert.</p>
+          <p id="aircraftMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+          <form id="aircraftForm" onsubmit="submitAircraft(event)" class="mt-6 rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
+            <h4 id="aircraftFormTitle" class="text-lg font-semibold text-slate-900">Flugzeug auswählen</h4>
+            <p id="aircraftFormHelper" class="mt-2 text-sm text-slate-500">Wähle ein Flugzeug aus der Liste zum Bearbeiten.</p>
+            <div class="mt-4 space-y-4">
+              <div>
+                <span class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">HEX</span>
+                <div id="aircraftHexDisplay" class="mt-2 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base font-semibold text-slate-900 shadow-inner shadow-white/40">—</div>
+              </div>
+              <div>
+                <label for="aircraftName" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Name</label>
+                <input id="aircraftName" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" disabled />
+              </div>
+            </div>
+            <div class="mt-6 flex flex-wrap items-center gap-3">
+              <button id="aircraftSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" disabled>Speichern</button>
+              <button id="aircraftCancel" type="button" class="hidden rounded-2xl border border-brand-red/30 bg-white/70 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="cancelAircraftEdit()">Abbrechen</button>
+            </div>
+            <p id="aircraftFormMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+          </form>
         </section>
         <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1330,10 +1655,19 @@
       if (speedInput) speedInput.value = safeConfig.speedThresholdKt || "";
       if (timeoutInput) timeoutInput.value = safeConfig.offlineTimeoutSec || "";
 
+      const hexInput = document.getElementById("hexInput");
+      if (hexInput) {
+        hexInput.addEventListener("input", handleHexInputChange);
+      }
+
       renderPlacesTable(places);
       updatePlaceFormState();
+      currentAircraft = Array.isArray(aircraftList) ? aircraftList : [];
+      renderAircraftList(currentAircraft);
+      updateAircraftFormState();
       renderHexHistoryDropdown();
-      renderEventsTable(events);
+      handleHexInputChange();
+      renderEventsManagementTable(events);
     }
 
     async function fetchConfig() {
@@ -1363,6 +1697,15 @@
 
     async function fetchEventsList() {
       const res = await fetch("/events");
+      if (!res.ok) {
+        throw new Error(`Serverantwort ${res.status}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    }
+
+    async function fetchAircraftList() {
+      const res = await fetch("/aircraft");
       if (!res.ok) {
         throw new Error(`Serverantwort ${res.status}`);
       }
@@ -1418,7 +1761,206 @@
       empty.classList.add("hidden");
     }
 
-    function renderEventsTable(list) {
+    function renderAircraftList(list) {
+      const container = document.getElementById("aircraftList");
+      const empty = document.getElementById("aircraftEmpty");
+      if (!container || !empty) return;
+
+      if (!Array.isArray(list) || list.length === 0) {
+        container.innerHTML = "";
+        empty.classList.remove("hidden");
+        return;
+      }
+
+      const sorted = [...list]
+        .map(entry => (entry && entry.hex ? { ...entry, hex: normalizeHex(entry.hex) } : null))
+        .filter(entry => entry && entry.hex)
+        .sort((a, b) => {
+          const nameA = (a.name || "").toLowerCase();
+          const nameB = (b.name || "").toLowerCase();
+          if (nameA && nameB && nameA !== nameB) {
+            return nameA.localeCompare(nameB, "de");
+          }
+          return a.hex.localeCompare(b.hex);
+        });
+
+      const cards = sorted.map(entry => {
+        const hexLabel = entry.hex ? entry.hex.toUpperCase() : "—";
+        const nameLabel = entry.name ? entry.name : "";
+        const description = nameLabel ? "Gespeicherter Name" : "Noch kein Name hinterlegt";
+        const normalized = normalizeHex(entry.hex);
+        return `<article class="group rounded-3xl border border-slate-100/80 bg-white/80 p-4 shadow-inner shadow-white/50 transition duration-300 hover:border-brand-purple/40 hover:shadow-brand-purple/10">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div class="space-y-2">
+                <h4 class="text-lg font-semibold text-slate-900">${escapeHtml(nameLabel || hexLabel)}</h4>
+                <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">HEX ${escapeHtml(hexLabel)}</p>
+                <p class="text-xs text-slate-500">${escapeHtml(description)}</p>
+              </div>
+              <div class="flex flex-wrap justify-end gap-2">
+                <button type="button" class="inline-flex items-center justify-center rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-brand-purple transition duration-200 hover:bg-brand-purple/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/30" onclick="startEditAircraft('${escapeHtml(normalized)}')">Umbenennen</button>
+              </div>
+            </div>
+          </article>`;
+      }).join("");
+
+      container.innerHTML = cards;
+      empty.classList.add("hidden");
+    }
+
+    function showAircraftMessage(message, type = "") {
+      const el = document.getElementById("aircraftMessage");
+      if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `mt-4 min-h-[1.5rem] text-sm font-semibold ${color}`;
+      el.textContent = message || "";
+    }
+
+    function setAircraftFormMessage(message, type = "") {
+      const el = document.getElementById("aircraftFormMessage");
+      if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `mt-4 min-h-[1.5rem] text-sm font-semibold ${color}`;
+      el.textContent = message || "";
+    }
+
+    function updateAircraftFormState() {
+      const title = document.getElementById("aircraftFormTitle");
+      const helper = document.getElementById("aircraftFormHelper");
+      const display = document.getElementById("aircraftHexDisplay");
+      const nameInput = document.getElementById("aircraftName");
+      const submit = document.getElementById("aircraftSubmit");
+      const cancel = document.getElementById("aircraftCancel");
+
+      if (editingAircraftHex) {
+        const entry = getAircraftEntry(editingAircraftHex);
+        if (title) title.textContent = "Flugzeug umbenennen";
+        if (helper) {
+          helper.textContent = entry && entry.name
+            ? `Aktueller Name: ${entry.name}`
+            : "Vergebe einen Namen für dieses Flugzeug.";
+        }
+        if (display) display.textContent = editingAircraftHex.toUpperCase();
+        if (nameInput) {
+          nameInput.disabled = false;
+          nameInput.value = entry && entry.name ? entry.name : "";
+          nameInput.focus();
+          nameInput.select();
+        }
+        if (submit) submit.disabled = false;
+        if (cancel) cancel.classList.remove("hidden");
+      } else {
+        if (title) title.textContent = "Flugzeug auswählen";
+        if (helper) helper.textContent = "Wähle ein Flugzeug aus der Liste zum Bearbeiten.";
+        if (display) display.textContent = "—";
+        if (nameInput) {
+          nameInput.value = "";
+          nameInput.disabled = true;
+        }
+        if (submit) submit.disabled = true;
+        if (cancel) cancel.classList.add("hidden");
+      }
+
+      setAircraftFormMessage("", "");
+    }
+
+    async function refreshAircraftList(showStatus = true) {
+      try {
+        const list = await fetchAircraftList();
+        currentAircraft = Array.isArray(list) ? list : [];
+        renderAircraftList(currentAircraft);
+        if (!editingAircraftHex || !getAircraftEntry(editingAircraftHex)) {
+          editingAircraftHex = null;
+        }
+        updateAircraftFormState();
+        renderHexHistoryDropdown();
+        handleHexInputChange();
+        if (showStatus) {
+          showAircraftMessage("Flugzeuge aktualisiert.", "success");
+        } else {
+          showAircraftMessage("", "");
+        }
+      } catch (err) {
+        console.error("[Aircraft] Aktualisierung fehlgeschlagen:", err);
+        const message = err && err.message ? err.message : String(err);
+        showAircraftMessage(`Fehler beim Aktualisieren: ${message}`, "error");
+      }
+    }
+
+    function startEditAircraft(hex) {
+      const normalized = normalizeHex(hex);
+      if (!normalized) {
+        return;
+      }
+      editingAircraftHex = normalized;
+      updateAircraftFormState();
+    }
+
+    function cancelAircraftEdit() {
+      editingAircraftHex = null;
+      updateAircraftFormState();
+    }
+
+    async function submitAircraft(event) {
+      event.preventDefault();
+      if (!editingAircraftHex) {
+        setAircraftFormMessage("Bitte zuerst ein Flugzeug auswählen.", "error");
+        return;
+      }
+
+      const nameInput = document.getElementById("aircraftName");
+      const nameValue = nameInput ? nameInput.value.trim() : "";
+      if (!nameValue) {
+        setAircraftFormMessage("Bitte einen Namen eingeben.", "error");
+        if (nameInput) nameInput.focus();
+        return;
+      }
+
+      try {
+        const res = await fetch(`/aircraft/${encodeURIComponent(editingAircraftHex)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nameValue })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data && data.error ? data.error : `Serverantwort ${res.status}`);
+        }
+
+        const updatedHex = normalizeHex(data && data.hex ? data.hex : editingAircraftHex);
+        const updatedName = data && typeof data.name === "string" && data.name.trim()
+          ? data.name.trim()
+          : nameValue;
+
+        currentAircraft = Array.isArray(currentAircraft) ? currentAircraft : [];
+        currentAircraft = currentAircraft.filter(entry => normalizeHex(entry && entry.hex) !== updatedHex);
+        currentAircraft.push({ ...data, hex: updatedHex, name: updatedName });
+
+        renderAircraftList(currentAircraft);
+        showAircraftMessage(`Name für ${updatedHex.toUpperCase()} gespeichert.`, "success");
+        setAircraftFormMessage("Änderungen gespeichert.", "success");
+
+        editingAircraftHex = null;
+        updateAircraftFormState();
+        renderHexHistoryDropdown();
+        handleHexInputChange();
+      } catch (err) {
+        console.error("[Aircraft] Speichern fehlgeschlagen:", err);
+        const message = err && err.message ? err.message : String(err);
+        setAircraftFormMessage(`Fehler: ${message}`, "error");
+      }
+    }
+
+    function renderEventsManagementTable(list) {
       const container = document.getElementById("eventsList");
       const empty = document.getElementById("eventsEmpty");
       if (!container || !empty) return;
@@ -1496,7 +2038,7 @@
       try {
         const list = await fetchEventsList();
         currentEvents = Array.isArray(list) ? list : [];
-        renderEventsTable(currentEvents);
+        renderEventsManagementTable(currentEvents);
         if (showStatus) {
           showEventsSettingsMessage("Events aktualisiert.", "success");
         } else {
@@ -1982,6 +2524,42 @@
       }
     }
 
+    function handleHexInputChange() {
+      const input = document.getElementById("hexInput");
+      const wrapper = document.getElementById("hexNameWrapper");
+      const info = document.getElementById("hexNameInfo");
+      const nameInput = document.getElementById("hexNameInput");
+
+      if (!input || !wrapper || !info || !nameInput) {
+        return;
+      }
+
+      const value = normalizeHex(input.value || "");
+      const entry = value ? getAircraftEntry(value) : null;
+
+      if (!value) {
+        wrapper.classList.add("hidden");
+        info.classList.add("hidden");
+        info.textContent = "";
+        nameInput.value = "";
+        return;
+      }
+
+      if (entry && entry.name) {
+        info.textContent = `Gespeicherter Name: ${entry.name}`;
+        info.classList.remove("hidden");
+        wrapper.classList.add("hidden");
+        nameInput.value = entry.name;
+      } else {
+        info.textContent = "Neues Flugzeug – bitte Namen vergeben.";
+        info.classList.remove("hidden");
+        wrapper.classList.remove("hidden");
+        if (!nameInput.value.trim()) {
+          nameInput.value = "";
+        }
+      }
+    }
+
     function renderHexHistoryDropdown() {
       const wrapper = document.getElementById("hexHistoryWrapper");
       const select = document.getElementById("hexHistorySelect");
@@ -1996,20 +2574,28 @@
       wrapper.classList.remove("hidden");
       const options = hexHistory.map(entry => {
         if (!entry || !entry.hex) return "";
+        const normalized = normalizeHex(entry.hex);
+        if (!normalized) return "";
+        const aircraftName = getAircraftEntry(normalized)?.name || "";
+        const callsign = entry.callsign || "";
         const labelParts = [];
-        if (entry.callsign) {
-          labelParts.push(entry.callsign);
+        if (aircraftName) {
+          labelParts.push(aircraftName);
         }
-        labelParts.push(entry.hex.toUpperCase());
+        if (callsign && callsign.toLowerCase() !== aircraftName.toLowerCase()) {
+          labelParts.push(callsign);
+        }
+        labelParts.push(normalized.toUpperCase());
         const label = labelParts.join(" • ");
-        return `<option value="${escapeHtml(entry.hex)}">${escapeHtml(label)}</option>`;
+        return `<option value="${escapeHtml(normalized)}">${escapeHtml(label)}</option>`;
       }).join("");
       select.innerHTML = `<option value="">Gespeicherten Hex wählen</option>${options}`;
       select.value = "";
     }
 
     function handleHexHistorySelection(event) {
-      const value = event && event.target ? event.target.value : "";
+      const rawValue = event && event.target ? event.target.value : "";
+      const value = normalizeHex(rawValue);
       if (!value) {
         return;
       }
@@ -2018,16 +2604,20 @@
         input.value = value;
       }
       const entry = Array.isArray(hexHistory)
-        ? hexHistory.find(item => item && item.hex === value.toLowerCase())
+        ? hexHistory.find(item => item && normalizeHex(item.hex) === value)
         : null;
-      if (entry && entry.callsign) {
-        setHexStatus(`${entry.callsign} (${value.toUpperCase()}) übernommen.`, "");
+      const aircraftName = getAircraftEntry(value)?.name || "";
+      const callsign = entry && entry.callsign ? entry.callsign : "";
+      const displayName = aircraftName || callsign;
+      if (displayName) {
+        setHexStatus(`${displayName} (${value.toUpperCase()}) übernommen.`, "");
       } else {
         setHexStatus(`Hex ${value.toUpperCase()} übernommen.`, "");
       }
       if (event && event.target) {
         event.target.value = "";
       }
+      handleHexInputChange();
     }
 
     function clearHexHistory() {

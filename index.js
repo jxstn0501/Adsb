@@ -19,8 +19,10 @@ const logCounts = {};     // Zeilenanzahl pro Hex-Datei
 const lastLogRecords = {}; // Letzter Log-Eintrag pro Hex
 const placesPath = path.join(__dirname, "places.json");
 const configPath = path.join(__dirname, "config.json");
+const aircraftPath = path.join(__dirname, "aircraft.json");
 let places = [];
 let lastEventId = 0;
+let aircraftProfiles = [];
 
 const ADSB_BASE_URL = "https://globe.adsbexchange.com/?icao=";
 const NAVIGATION_WAIT_UNTIL = "domcontentloaded";
@@ -101,6 +103,167 @@ function startPlacesWatcher() {
   } catch (err) {
     console.error("⚠️ Beobachten von places.json fehlgeschlagen:", err.message);
   }
+}
+
+// ===== Aircraft storage =====
+function normalizeAircraftHex(hex) {
+  if (typeof hex !== "string") {
+    return "";
+  }
+  return hex.trim().toLowerCase();
+}
+
+function sanitizeAircraftEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const normalizedHex = normalizeAircraftHex(entry.hex);
+  if (!normalizedHex) {
+    return null;
+  }
+
+  const sanitized = { hex: normalizedHex };
+  if (entry.name !== undefined && entry.name !== null) {
+    const name = String(entry.name).trim();
+    if (name) {
+      sanitized.name = name;
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeAircraftList(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  const sanitized = [];
+  const seen = new Set();
+
+  for (const entry of list) {
+    const candidate = sanitizeAircraftEntry(entry);
+    if (!candidate) {
+      continue;
+    }
+
+    if (seen.has(candidate.hex)) {
+      const index = sanitized.findIndex(item => item.hex === candidate.hex);
+      if (index >= 0) {
+        sanitized[index] = candidate;
+      }
+      continue;
+    }
+
+    seen.add(candidate.hex);
+    sanitized.push(candidate);
+  }
+
+  return sanitized;
+}
+
+async function loadAircraftFromDisk() {
+  try {
+    const raw = await fsp.readFile(aircraftPath, "utf8");
+    if (!raw.trim()) {
+      aircraftProfiles = [];
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      console.warn("⚠️ aircraft.json enthält kein Array. Bestehende Werte bleiben erhalten.");
+      return;
+    }
+
+    aircraftProfiles = sanitizeAircraftList(parsed);
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      try {
+        await fsp.writeFile(aircraftPath, JSON.stringify([], null, 2));
+      } catch (writeErr) {
+        console.error("❌ aircraft.json konnte nicht erstellt werden:", writeErr.message);
+      }
+      aircraftProfiles = [];
+    } else if (err.name === "SyntaxError") {
+      console.error("❌ Ungültiges JSON in aircraft.json:", err.message);
+    } else {
+      console.error("❌ aircraft.json konnte nicht gelesen werden:", err.message);
+    }
+  }
+}
+
+function getAircraftList() {
+  return Array.isArray(aircraftProfiles)
+    ? aircraftProfiles.map(entry => ({ ...entry }))
+    : [];
+}
+
+function getAircraftByHex(hex) {
+  const normalized = normalizeAircraftHex(hex);
+  if (!normalized || !Array.isArray(aircraftProfiles)) {
+    return null;
+  }
+
+  const entry = aircraftProfiles.find(item => item && normalizeAircraftHex(item.hex) === normalized);
+  return entry ? { ...entry } : null;
+}
+
+async function saveAircraft(list) {
+  if (!Array.isArray(list)) {
+    throw new TypeError("Aircraft list must be an array.");
+  }
+
+  const sanitized = sanitizeAircraftList(list);
+  const serialized = JSON.stringify(sanitized, null, 2);
+  const parsed = JSON.parse(serialized);
+  aircraftProfiles = parsed;
+  await fsp.writeFile(aircraftPath, serialized);
+  return getAircraftList();
+}
+
+async function upsertAircraft(hex, name) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    throw new Error("Ungültiger Hex-Code.");
+  }
+
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+  if (!trimmedName) {
+    throw new Error("Feld 'name' wird benötigt.");
+  }
+
+  const current = getAircraftList();
+  const filtered = current.filter(entry => normalizeAircraftHex(entry.hex) !== normalizedHex);
+  filtered.push({ hex: normalizedHex, name: trimmedName });
+  await saveAircraft(filtered);
+  return getAircraftByHex(normalizedHex);
+}
+
+function startAircraftWatcher() {
+  try {
+    fs.watchFile(aircraftPath, { interval: 1000 }, () => {
+      loadAircraftFromDisk().catch(err => {
+        console.error("⚠️ aircraft.json konnte nicht neu geladen werden:", err.message);
+      });
+    });
+  } catch (err) {
+    console.error("⚠️ Beobachten von aircraft.json fehlgeschlagen:", err.message);
+  }
+}
+
+function parseAircraftPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Body muss ein Objekt sein.");
+  }
+
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  if (!name) {
+    throw new Error("Feld 'name' wird benötigt.");
+  }
+
+  return { name };
 }
 
 function normalizeConfig(raw) {
@@ -518,6 +681,11 @@ async function initializeState() {
     console.error("⚠️ places.json konnte nicht geladen werden:", err.message);
   });
   startPlacesWatcher();
+
+  await loadAircraftFromDisk().catch(err => {
+    console.error("⚠️ aircraft.json konnte nicht geladen werden:", err.message);
+  });
+  startAircraftWatcher();
 
   await loadConfigFromDisk().catch(err => {
     console.error("⚠️ config.json konnte nicht geladen werden:", err.message);
@@ -1498,7 +1666,15 @@ async function handleSetRequest(res, hexParam) {
     return;
   }
 
-  targetHex = raw.toLowerCase();
+  const normalizedHex = normalizeAircraftHex(raw);
+  if (!normalizedHex) {
+    sendError(res, 400, "Ungültiger Hex-Code.");
+    return;
+  }
+
+  targetHex = normalizedHex;
+  const aircraftEntry = getAircraftByHex(targetHex);
+  const aircraftName = aircraftEntry && aircraftEntry.name ? aircraftEntry.name : null;
 
   try {
     await fsp.writeFile("last_target.json", JSON.stringify({ hex: targetHex }, null, 2));
@@ -1508,7 +1684,11 @@ async function handleSetRequest(res, hexParam) {
 
   if (!page) {
     console.log("🎯 Neues Ziel gespeichert, Browser noch nicht bereit:", targetHex);
-    sendJSON(res, 202, { message: "Ziel gespeichert. Browser wird vorbereitet.", hex: targetHex });
+    const payload = { message: "Ziel gespeichert. Browser wird vorbereitet.", hex: targetHex };
+    if (aircraftName) {
+      payload.name = aircraftName;
+    }
+    sendJSON(res, 202, payload);
     return;
   }
 
@@ -1521,6 +1701,9 @@ async function handleSetRequest(res, hexParam) {
     }
     console.log("🎯 Navigiere zu neuem Ziel:", targetHex);
     const responsePayload = { success: true, hex: targetHex };
+    if (aircraftName) {
+      responsePayload.name = aircraftName;
+    }
     if (latestData && typeof latestData === "object") {
       const latestHex = latestData.hex ? String(latestData.hex).toLowerCase() : null;
       if (latestHex && latestHex === targetHex && latestData.callsign) {
@@ -1552,6 +1735,71 @@ async function handleRequest(req, res) {
 
   if (q.pathname === "/events") {
     sendJSON(res, 200, events);
+    return;
+  }
+
+  if (q.pathname && q.pathname.startsWith("/aircraft")) {
+    const segments = q.pathname.split("/").filter(Boolean);
+
+    if (segments.length === 1) {
+      if (req.method === "GET") {
+        sendJSON(res, 200, getAircraftList());
+        return;
+      }
+
+      sendError(res, 405, "Methode nicht erlaubt.");
+      return;
+    }
+
+    if (segments.length === 2) {
+      let hexSegment;
+      try {
+        hexSegment = decodeURIComponent(segments[1]);
+      } catch (err) {
+        sendError(res, 400, "Ungültiger Hex-Code.");
+        return;
+      }
+
+      const normalizedHex = normalizeAircraftHex(hexSegment);
+      if (!normalizedHex) {
+        sendError(res, 400, "Ungültiger Hex-Code.");
+        return;
+      }
+
+      if (req.method === "GET") {
+        const entry = getAircraftByHex(normalizedHex);
+        if (!entry) {
+          sendError(res, 404, "Flugzeug nicht gefunden.");
+          return;
+        }
+        sendJSON(res, 200, entry);
+        return;
+      }
+
+      if (req.method === "PUT") {
+        const payload = await parseJsonBody(req);
+        let aircraftData;
+        try {
+          aircraftData = parseAircraftPayload(payload);
+        } catch (err) {
+          sendError(res, 400, err.message);
+          return;
+        }
+
+        try {
+          const updated = await upsertAircraft(normalizedHex, aircraftData.name);
+          sendJSON(res, 200, updated || { hex: normalizedHex, name: aircraftData.name });
+        } catch (err) {
+          sendError(res, 400, err.message || "Speichern fehlgeschlagen.");
+        }
+        return;
+      }
+
+      sendError(res, 405, "Methode nicht erlaubt.");
+      return;
+    }
+
+    sendError(res, 404, "Pfad nicht gefunden.");
     return;
   }
 
