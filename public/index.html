@@ -496,15 +496,9 @@
       const container = document.getElementById("content");
       if (!container) return;
 
-      const heading = currentHex ? currentHex.toUpperCase() : "—";
-
       container.innerHTML = `
         <section class="view-panel">
           <div class="relative overflow-hidden rounded-[1.5rem] bg-slate-200 shadow-card ring-1 ring-black/5">
-            <div class="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-2 rounded-full bg-white/85 px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-brand-ink/80 backdrop-blur">
-              <span>Live Map – ADS-B Exchange Globe</span>
-              <span class="rounded-full bg-brand-purple/10 px-3 py-1 text-[0.65rem] font-semibold text-brand-purple">HEX ${heading}</span>
-            </div>
             <iframe
               src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"
               class="h-[calc(100vh-14rem)] min-h-[24rem] w-full border-0"
@@ -1684,7 +1678,7 @@
               <div id="aircraftList" class="mt-6 space-y-3"></div>
               <p id="aircraftEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Flugzeuge gespeichert.</p>
               <p id="aircraftMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-              <form id="aircraftForm" onsubmit="submitAircraft(event)" class="mt-6 rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
+              <form id="aircraftForm" onsubmit="submitAircraft(event)" class="mt-6 hidden rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
                 <h4 id="aircraftFormTitle" class="text-lg font-semibold text-slate-900">Flugzeug auswählen</h4>
                 <p id="aircraftFormHelper" class="mt-2 text-sm text-slate-500">Wähle ein Flugzeug aus der Liste zum Bearbeiten.</p>
                 <div class="mt-4 space-y-4">
@@ -2016,6 +2010,7 @@
     }
 
     function updateAircraftFormState() {
+      const form = document.getElementById("aircraftForm");
       const title = document.getElementById("aircraftFormTitle");
       const helper = document.getElementById("aircraftFormHelper");
       const display = document.getElementById("aircraftHexDisplay");
@@ -2025,6 +2020,7 @@
 
       if (editingAircraftHex) {
         const entry = getAircraftEntry(editingAircraftHex);
+        if (form) form.classList.remove("hidden");
         if (title) title.textContent = "Flugzeug umbenennen";
         if (helper) {
           helper.textContent = entry && entry.name
@@ -2041,6 +2037,7 @@
         if (submit) submit.disabled = false;
         if (cancel) cancel.classList.remove("hidden");
       } else {
+        if (form) form.classList.add("hidden");
         if (title) title.textContent = "Flugzeug auswählen";
         if (helper) helper.textContent = "Wähle ein Flugzeug aus der Liste zum Bearbeiten.";
         if (display) display.textContent = "—";
