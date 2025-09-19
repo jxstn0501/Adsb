@@ -307,11 +307,19 @@
       }
     }
 
-    function isNotificationSupported() {
-      return typeof window !== "undefined"
-        && "Notification" in window
+    function isServiceWorkerSupported() {
+      return typeof navigator !== "undefined"
         && "serviceWorker" in navigator
         && typeof navigator.serviceWorker !== "undefined";
+    }
+
+    function isNotificationApiAvailable() {
+      return typeof window !== "undefined"
+        && "Notification" in window;
+    }
+
+    function isNotificationSupported() {
+      return isServiceWorkerSupported() && isNotificationApiAvailable();
     }
 
     function syncNotificationPreferencesFromConfig(config) {
@@ -331,7 +339,7 @@
     }
 
     async function ensureServiceWorkerReady() {
-      if (!isNotificationSupported()) {
+      if (!isServiceWorkerSupported()) {
         return null;
       }
 
@@ -361,7 +369,7 @@
     }
 
     async function ensureNotificationPermission() {
-      if (!isNotificationSupported()) {
+      if (!isNotificationApiAvailable()) {
         return false;
       }
 
