@@ -186,6 +186,7 @@
 
   <script>
     const HEX_HISTORY_STORAGE_KEY = "heliTrackerHexHistory";
+    const DEFAULT_PLACE_RADIUS_FALLBACK_METERS = 500;
     let hexHistory = loadHexHistory();
     let currentHex = "";
     let settingsInterval = null;
@@ -1777,6 +1778,11 @@
                         <input id="placeLon" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
                       </div>
                     </div>
+                    <div id="placeRadiusRow" class="hidden">
+                      <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeRadius">Individueller Radius (m)</label>
+                      <input id="placeRadius" type="number" min="1" step="1" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" disabled />
+                      <p id="placeRadiusHelper" class="mt-2 text-xs text-slate-500"></p>
+                    </div>
                   </div>
                   <div class="mt-6 flex flex-wrap items-center gap-3">
                     <button id="placeSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Hinzufügen</button>
@@ -1878,6 +1884,25 @@
       return Array.isArray(data) ? data : [];
     }
 
+    function getDefaultPlaceRadiusMeters() {
+      const configured = currentConfigCache && currentConfigCache.placeMatchRadiusMeters;
+      const parsed = parseNumberInput(configured);
+      if (parsed !== null && parsed > 0) {
+        return Math.round(parsed);
+      }
+      return DEFAULT_PLACE_RADIUS_FALLBACK_METERS;
+    }
+
+    function getPlaceRadiusInfo(place) {
+      if (place && Object.prototype.hasOwnProperty.call(place, "matchRadiusMeters")) {
+        const parsed = parseNumberInput(place.matchRadiusMeters);
+        if (parsed !== null && parsed > 0) {
+          return { value: parsed, isCustom: true };
+        }
+      }
+      return { value: getDefaultPlaceRadiusMeters(), isCustom: false };
+    }
+
     async function fetchAircraftList() {
       const res = await fetch("/aircraft");
       if (!res.ok) {
@@ -1906,6 +1931,14 @@
         const type = place.type !== undefined && place.type !== null ? place.type : "—";
         const lat = escapeHtml(formatCoordinate(place.lat));
         const lon = escapeHtml(formatCoordinate(place.lon));
+        const { value: placeRadiusValue, isCustom: placeRadiusCustom } = getPlaceRadiusInfo(place);
+        const roundedRadius = Number.isFinite(placeRadiusValue) ? Math.round(placeRadiusValue) : placeRadiusValue;
+        const radiusLabel = placeRadiusCustom
+          ? `Individuell: ${roundedRadius} m`
+          : `Standard (${roundedRadius} m)`;
+        const radiusBadgeClass = placeRadiusCustom
+          ? "rounded-2xl bg-amber-100 px-3 py-1 font-semibold text-amber-700"
+          : "rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600";
         const actionButtons = idString
           ? `
               <button type="button" class="inline-flex items-center justify-center rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-brand-purple transition duration-200 hover:bg-brand-purple/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/30" onclick='startEditPlace(${editId})'>Bearbeiten</button>
@@ -1922,6 +1955,7 @@
                 <div class="flex flex-wrap gap-2 text-xs text-slate-500">
                   <span class="rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600">Lat: <span class="text-brand-ink">${lat}</span></span>
                   <span class="rounded-2xl bg-brand-frost px-3 py-1 font-semibold text-slate-600">Lon: <span class="text-brand-ink">${lon}</span></span>
+                  <span class="${radiusBadgeClass}">Radius: <span class="text-brand-ink">${escapeHtml(radiusLabel)}</span></span>
                 </div>
               </div>
               <div class="flex flex-wrap justify-end gap-2">
@@ -2260,6 +2294,9 @@
       const title = document.getElementById("placeFormTitle");
       const submit = document.getElementById("placeSubmit");
       const cancel = document.getElementById("placeCancel");
+      const radiusRow = document.getElementById("placeRadiusRow");
+      const radiusInput = document.getElementById("placeRadius");
+      const radiusHelper = document.getElementById("placeRadiusHelper");
       if (title) {
         title.textContent = editingPlaceId ? "Ort bearbeiten" : "Neuen Ort hinzufügen";
       }
@@ -2269,6 +2306,25 @@
       if (cancel) {
         cancel.classList.toggle("hidden", !editingPlaceId);
       }
+      const defaultRadius = getDefaultPlaceRadiusMeters();
+      if (radiusRow) {
+        radiusRow.classList.toggle("hidden", !editingPlaceId);
+      }
+      if (radiusInput) {
+        if (editingPlaceId) {
+          radiusInput.disabled = false;
+        } else {
+          radiusInput.value = "";
+          radiusInput.disabled = true;
+        }
+      }
+      if (radiusHelper) {
+        if (editingPlaceId) {
+          radiusHelper.textContent = `Optional: Eigener Radius in Metern. Leer lassen für Standard (${defaultRadius} m).`;
+        } else {
+          radiusHelper.textContent = "";
+        }
+      }
     }
 
     function resetPlaceFormValues() {
@@ -2277,6 +2333,10 @@
         form.reset();
       }
       clearPlaceSearchResults();
+      const radiusInput = document.getElementById("placeRadius");
+      if (radiusInput) {
+        radiusInput.value = "";
+      }
     }
 
     function startEditPlace(id) {
@@ -2291,10 +2351,15 @@
       const typeInput = document.getElementById("placeType");
       const latInput = document.getElementById("placeLat");
       const lonInput = document.getElementById("placeLon");
+      const radiusInput = document.getElementById("placeRadius");
       if (nameInput) nameInput.value = place.name !== undefined && place.name !== null ? place.name : "";
       if (typeInput) typeInput.value = place.type !== undefined && place.type !== null ? place.type : "";
       if (latInput) latInput.value = place.lat !== undefined && place.lat !== null ? place.lat : "";
       if (lonInput) lonInput.value = place.lon !== undefined && place.lon !== null ? place.lon : "";
+      if (radiusInput) {
+        const info = getPlaceRadiusInfo(place);
+        radiusInput.value = info.isCustom && Number.isFinite(info.value) ? info.value : "";
+      }
 
       updatePlaceFormState();
       showPlaceMessage("", "");
@@ -2378,6 +2443,8 @@
           radiusInput.value = data.placeMatchRadiusMeters;
         }
 
+        await refreshPlaces();
+        await refreshEventsForSettings(false);
         showConfigMessage("Konfiguration gespeichert.", "success");
       } catch (err) {
         console.error("[Config] Speichern fehlgeschlagen:", err);
@@ -2417,7 +2484,29 @@
         return;
       }
 
+      const radiusInput = document.getElementById("placeRadius");
+      let includeRadius = false;
+      let radiusValue = null;
+      if (editingPlaceId && radiusInput) {
+        const rawRadius = typeof radiusInput.value === "string" ? radiusInput.value.trim() : "";
+        if (rawRadius) {
+          const parsedRadius = parseNumberInput(rawRadius);
+          if (parsedRadius === null || parsedRadius <= 0) {
+            showPlaceMessage("Radius muss größer als 0 sein.", "error");
+            return;
+          }
+          includeRadius = true;
+          radiusValue = parsedRadius;
+        } else {
+          includeRadius = true;
+          radiusValue = null;
+        }
+      }
+
       const payload = { name, type, lat, lon };
+      if (includeRadius) {
+        payload.matchRadiusMeters = radiusValue;
+      }
       const targetId = editingPlaceId ? encodeURIComponent(editingPlaceId) : null;
       const url = editingPlaceId ? `/places/${targetId}` : "/places";
       const method = editingPlaceId ? "PUT" : "POST";

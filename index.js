@@ -23,6 +23,7 @@ const aircraftPath = path.join(__dirname, "aircraft.json");
 let places = [];
 let lastEventId = 0;
 let aircraftProfiles = [];
+let eventPlaceRecalculationPromise = null;
 
 const ADSB_BASE_URL = "https://globe.adsbexchange.com/?icao=";
 const NAVIGATION_WAIT_UNTIL = "domcontentloaded";
@@ -48,17 +49,46 @@ const DEFAULT_CONFIG = {
 let config = { ...DEFAULT_CONFIG };
 
 // ===== Places storage =====
+function sanitizePlaceEntry(place) {
+  if (!place || typeof place !== "object") {
+    return place;
+  }
+
+  const sanitized = { ...place };
+
+  if (Object.prototype.hasOwnProperty.call(sanitized, "matchRadiusMeters")) {
+    const radius = toFiniteNumber(sanitized.matchRadiusMeters);
+    if (radius !== null && radius > 0) {
+      sanitized.matchRadiusMeters = radius;
+    } else {
+      delete sanitized.matchRadiusMeters;
+    }
+  }
+
+  return sanitized;
+}
+
 async function loadPlacesFromDisk() {
   try {
     const raw = await fsp.readFile(placesPath, "utf8");
     if (!raw.trim()) {
       places = [];
+      try {
+        await recalculateEventPlacesForAllEvents();
+      } catch (err) {
+        console.error("⚠️ Events konnten nach Löschen der Orte nicht neu berechnet werden:", err.message);
+      }
       return;
     }
 
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      places = parsed;
+      places = parsed.map(sanitizePlaceEntry);
+      try {
+        await recalculateEventPlacesForAllEvents();
+      } catch (err) {
+        console.error("⚠️ Events konnten nach Laden der Orte nicht neu berechnet werden:", err.message);
+      }
     } else {
       console.warn("⚠️ places.json enthält kein Array. Bestehende Werte bleiben erhalten.");
     }
@@ -67,6 +97,11 @@ async function loadPlacesFromDisk() {
       try {
         await fsp.writeFile(placesPath, JSON.stringify([], null, 2));
         places = [];
+        try {
+          await recalculateEventPlacesForAllEvents();
+        } catch (recalcErr) {
+          console.error("⚠️ Events konnten nach Erstellen der Orte-Datei nicht neu berechnet werden:", recalcErr.message);
+        }
       } catch (writeErr) {
         console.error("❌ places.json konnte nicht erstellt werden:", writeErr.message);
       }
@@ -89,7 +124,8 @@ async function savePlaces(list) {
     throw new TypeError("Places list must be an array.");
   }
 
-  const serialized = JSON.stringify(list, null, 2);
+  const normalizedList = list.map(sanitizePlaceEntry);
+  const serialized = JSON.stringify(normalizedList, null, 2);
   const parsed = JSON.parse(serialized);
   places = parsed;
   await fsp.writeFile(placesPath, serialized);
@@ -315,18 +351,42 @@ function getPlaceMatchRadiusMeters() {
   return DEFAULT_CONFIG.placeMatchRadiusMeters;
 }
 
+function resolveConfiguredPlaceRadiusMeters(candidate) {
+  const radius = toFiniteNumber(candidate?.placeMatchRadiusMeters);
+  if (radius !== null && radius > 0) {
+    return radius;
+  }
+  return DEFAULT_CONFIG.placeMatchRadiusMeters;
+}
+
+async function handleConfigRadiusChange(previousConfig, nextConfig) {
+  const previousRadius = resolveConfiguredPlaceRadiusMeters(previousConfig);
+  const nextRadius = resolveConfiguredPlaceRadiusMeters(nextConfig);
+
+  if (previousRadius !== nextRadius) {
+    await recalculateEventPlacesForAllEvents();
+  }
+}
+
 async function loadConfigFromDisk() {
+  const previousConfig = { ...config };
   try {
     const raw = await fsp.readFile(configPath, "utf8");
 
     if (!raw.trim()) {
       config = { ...DEFAULT_CONFIG };
-      await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
+      try {
+        await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
+      } catch (writeErr) {
+        console.error("❌ config.json konnte nicht erstellt werden:", writeErr.message);
+      }
+      await handleConfigRadiusChange(previousConfig, config);
       return;
     }
 
     const parsed = JSON.parse(raw);
     config = normalizeConfig(parsed);
+    await handleConfigRadiusChange(previousConfig, config);
   } catch (err) {
     if (err.code === "ENOENT") {
       try {
@@ -335,19 +395,24 @@ async function loadConfigFromDisk() {
         console.error("❌ config.json konnte nicht erstellt werden:", writeErr.message);
       }
       config = { ...DEFAULT_CONFIG };
+      await handleConfigRadiusChange(previousConfig, config);
     } else if (err.name === "SyntaxError") {
       console.error("❌ Ungültiges JSON in config.json:", err.message);
       config = { ...DEFAULT_CONFIG };
+      await handleConfigRadiusChange(previousConfig, config);
     } else {
       console.error("❌ config.json konnte nicht gelesen werden:", err.message);
       config = { ...DEFAULT_CONFIG };
+      await handleConfigRadiusChange(previousConfig, config);
     }
   }
 }
 
 async function saveConfig(newConfig) {
+  const previousConfig = { ...config };
   config = normalizeConfig(newConfig);
   await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
+  await handleConfigRadiusChange(previousConfig, config);
   return getConfig();
 }
 
@@ -440,10 +505,15 @@ async function persistEvents() {
   }
 }
 
-function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName }) {
+function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName, radiusMeters }) {
   if (!eventPlace) {
     return false;
   }
+
+  const comparisonRadius = toFiniteNumber(radiusMeters);
+  const fallbackRadius = comparisonRadius !== null && comparisonRadius > 0
+    ? comparisonRadius
+    : getPlaceMatchRadiusMeters();
 
   if (typeof eventPlace === "object") {
     const candidateId = eventPlace.id !== undefined && eventPlace.id !== null
@@ -457,7 +527,7 @@ function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName
     const lon = toFiniteNumber(eventPlace.lon);
     if (refLat !== null && refLon !== null && lat !== null && lon !== null) {
       const distance = haversine(lat, lon, refLat, refLon);
-      if (Number.isFinite(distance) && distance <= getPlaceMatchRadiusMeters()) {
+      if (Number.isFinite(distance) && distance <= fallbackRadius) {
         return true;
       }
     }
@@ -485,6 +555,7 @@ async function applyPlaceUpdateToEvents(originalPlace, updatedPlace) {
   const normalizedUpdated = normalizeEventPlace(updatedPlace);
   const normalizedOriginal = normalizeEventPlace(originalPlace);
   const reference = normalizedUpdated || normalizedOriginal;
+  const referenceSource = updatedPlace || originalPlace || null;
 
   if (!reference) {
     return;
@@ -503,7 +574,8 @@ async function applyPlaceUpdateToEvents(originalPlace, updatedPlace) {
         ? String(normalizedUpdated.name).trim().toLowerCase()
         : "");
 
-  const criteria = { targetId, refLat, refLon, refName };
+  const radiusOverride = referenceSource ? getEffectiveRadiusMetersForPlace(referenceSource) : null;
+  const criteria = { targetId, refLat, refLon, refName, radiusMeters: radiusOverride };
   const replacement = normalizedUpdated ? { ...normalizedUpdated } : null;
   let changed = false;
 
@@ -520,6 +592,92 @@ async function applyPlaceUpdateToEvents(originalPlace, updatedPlace) {
 
   if (changed) {
     await persistEvents();
+  }
+}
+
+function normalizeEventPlaceSnapshot(placeInfo) {
+  const normalized = normalizeEventPlace(placeInfo);
+  if (normalized === null || normalized === undefined) {
+    return null;
+  }
+
+  if (typeof normalized === "string") {
+    const trimmed = normalized.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  if (typeof normalized !== "object") {
+    return null;
+  }
+
+  const keys = Object.keys(normalized);
+  if (keys.length === 0) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function areEventPlaceSnapshotsEqual(a, b) {
+  if (!a && !b) {
+    return true;
+  }
+
+  if (!a || !b) {
+    return false;
+  }
+
+  if (typeof a === "string" || typeof b === "string") {
+    return a === b;
+  }
+
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+async function recalculateEventPlacesForAllEvents() {
+  if (eventPlaceRecalculationPromise) {
+    return eventPlaceRecalculationPromise;
+  }
+
+  eventPlaceRecalculationPromise = (async () => {
+    if (!Array.isArray(events) || events.length === 0) {
+      return false;
+    }
+
+    let changed = false;
+
+    for (const event of events) {
+      if (!event || typeof event !== "object") {
+        continue;
+      }
+
+      const candidatePlace = determinePlaceForRecord(event);
+      const candidateSnapshot = normalizeEventPlaceSnapshot(candidatePlace);
+      const existingSnapshot = Object.prototype.hasOwnProperty.call(event, "place")
+        ? normalizeEventPlaceSnapshot(event.place)
+        : null;
+
+      if (!areEventPlaceSnapshotsEqual(existingSnapshot, candidateSnapshot)) {
+        if (candidateSnapshot) {
+          event.place = candidateSnapshot;
+        } else if (Object.prototype.hasOwnProperty.call(event, "place")) {
+          delete event.place;
+        }
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await persistEvents();
+    }
+
+    return changed;
+  })();
+
+  try {
+    return await eventPlaceRecalculationPromise;
+  } finally {
+    eventPlaceRecalculationPromise = null;
   }
 }
 
@@ -548,7 +706,33 @@ function parsePlacePayload(payload) {
     throw new Error("Feld 'lon' muss zwischen -180 und 180 liegen.");
   }
 
-  return { name, type, lat, lon };
+  let includeRadius = false;
+  let matchRadiusMeters = null;
+
+  if (Object.prototype.hasOwnProperty.call(payload, "matchRadiusMeters")) {
+    includeRadius = true;
+    const rawRadius = payload.matchRadiusMeters;
+    if (rawRadius === null || rawRadius === "" || rawRadius === undefined) {
+      matchRadiusMeters = null;
+    } else {
+      const parsedRadius = toFiniteNumber(rawRadius);
+      if (parsedRadius === null || parsedRadius <= 0) {
+        throw new Error("Feld 'matchRadiusMeters' muss größer als 0 sein.");
+      }
+      matchRadiusMeters = parsedRadius;
+    }
+  }
+
+  const result = { name, type, lat, lon };
+  if (includeRadius) {
+    if (matchRadiusMeters === null) {
+      result.matchRadiusMeters = null;
+    } else {
+      result.matchRadiusMeters = matchRadiusMeters;
+    }
+  }
+
+  return result;
 }
 
 function parseConfigPayload(payload) {
@@ -1061,6 +1245,31 @@ function haversine(lat1, lon1, lat2, lon2) {
   return EARTH_RADIUS * c;
 }
 
+function getPlaceSpecificRadiusMeters(place) {
+  if (!place || typeof place !== "object") {
+    return null;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(place, "matchRadiusMeters")) {
+    return null;
+  }
+
+  const radius = toFiniteNumber(place.matchRadiusMeters);
+  if (radius !== null && radius > 0) {
+    return radius;
+  }
+
+  return null;
+}
+
+function getEffectiveRadiusMetersForPlace(place) {
+  const specific = getPlaceSpecificRadiusMeters(place);
+  if (specific !== null) {
+    return specific;
+  }
+  return getPlaceMatchRadiusMeters();
+}
+
 function determinePlaceForRecord(record) {
   if (!record || typeof record !== "object") {
     return { type: "external" };
@@ -1098,15 +1307,14 @@ function determinePlaceForRecord(record) {
       continue;
     }
 
-    if (distance < nearestDistance) {
+    const effectiveRadius = getEffectiveRadiusMetersForPlace(place);
+    if (distance <= effectiveRadius && distance < nearestDistance) {
       nearestDistance = distance;
       nearest = { place, lat: placeLat, lon: placeLon };
     }
   }
 
-  const radiusMeters = getPlaceMatchRadiusMeters();
-
-  if (nearest && nearestDistance <= radiusMeters) {
+  if (nearest) {
     const { place, lat: placeLat, lon: placeLon } = nearest;
     const name =
       typeof place.name === "string" && place.name.trim()
@@ -1901,8 +2109,21 @@ async function handleRequest(req, res) {
           return;
         }
         const newPlace = { id: generatePlaceId(), ...placeData };
+        if (Object.prototype.hasOwnProperty.call(newPlace, "matchRadiusMeters")) {
+          if (newPlace.matchRadiusMeters === null) {
+            delete newPlace.matchRadiusMeters;
+          } else {
+            const radius = toFiniteNumber(newPlace.matchRadiusMeters);
+            if (radius !== null && radius > 0) {
+              newPlace.matchRadiusMeters = radius;
+            } else {
+              delete newPlace.matchRadiusMeters;
+            }
+          }
+        }
         const updatedList = [...getPlaces(), newPlace];
         await savePlaces(updatedList);
+        await recalculateEventPlacesForAllEvents();
         sendJSON(res, 201, newPlace);
         return;
       }
@@ -1949,12 +2170,25 @@ async function handleRequest(req, res) {
 
         const originalPlace = current[index];
         const updatedPlace = { ...originalPlace, ...placeData, id: originalPlace?.id ?? placeId };
+        if (Object.prototype.hasOwnProperty.call(placeData, "matchRadiusMeters")) {
+          if (placeData.matchRadiusMeters === null) {
+            delete updatedPlace.matchRadiusMeters;
+          } else {
+            const radius = toFiniteNumber(placeData.matchRadiusMeters);
+            if (radius !== null && radius > 0) {
+              updatedPlace.matchRadiusMeters = radius;
+            } else {
+              delete updatedPlace.matchRadiusMeters;
+            }
+          }
+        }
         const updatedList = [...current];
         updatedList[index] = updatedPlace;
         await savePlaces(updatedList);
         await applyPlaceUpdateToEvents(originalPlace, updatedPlace).catch(err => {
           console.error("⚠️ Events konnten nach Orts-Update nicht angepasst werden:", err.message);
         });
+        await recalculateEventPlacesForAllEvents();
         sendJSON(res, 200, updatedPlace);
         return;
       }
@@ -1969,6 +2203,7 @@ async function handleRequest(req, res) {
         }
 
         await savePlaces(filtered);
+        await recalculateEventPlacesForAllEvents();
         sendJSON(res, 200, { success: true });
         return;
       }
