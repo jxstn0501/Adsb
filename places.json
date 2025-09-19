@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "mfqxpgb7",
+    "name": "HGW Uni",
+    "type": "Base",
+    "lat": 54.089087,
+    "lon": 13.408101,
+    "matchRadiusMeters": 800
+  }
+]
