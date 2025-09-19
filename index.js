@@ -24,6 +24,23 @@ let places = [];
 let lastEventId = 0;
 let aircraftProfiles = [];
 let eventPlaceRecalculationPromise = null;
+const eventStreamClients = new Set();
+const EVENT_STREAM_HEARTBEAT_INTERVAL_MS = 30_000;
+
+const EMBEDDED_ICON_192 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAAFtklEQVR4nO3dO28cVQCG4e/MXuzYDrHFLRFFihSIBpTCIEUpUBpqapS/QDpo6BD0/AUqChASAokCyiChICFEAw1VEJZjLoLYi/cyh2I8lkicyLMz6z0z3/u03pk9s953d3Zm9my4dXMUBZjKlj0AYJkIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANb6yx7AaYRQb/kYmxnHgxY9rrrrT9mi/idVJR9AjNJkImnOB6zXk7Jeo0M6Np1IeT7fsiFI/cGj/x6jNBnPt+426A/SCDzpAGKUen3p6Yth7gdr/x9p/35s/MGOUdp6Kmhldb7lZ1Ppj72Tq45RGq5Iz1xK4BmyIH/9HjUeLz+CZAMIQZpOpa0ng956b0XDYbXlYyzW8dlHU33x8UTrG2HuV+uHxpZJhyPp9Tf6uvpK7/i+qtj5Ndf7b4+VPfApLMuk0YF05flMb75TcaNb5IN3x/rpx1zn1uZ/F21CKz4El/uLVfYbz2Ifs864TrtMKvvKTUlte1oRALAoBABrBABrBABrBABrBABrBABryZ4IcxejNJtprpNsJwlBD510qyLPmzmGX25PKucDCCBBMUr9fnEdUyrqxHOSfj+NCAggMTEWF4rt7UZ9+em09jtACMXFhM9eCtq+Xv2yjfL2330z087dqMGw3hO3XN/eblR/sPwICCAxMUqDowA++XBSe31ZTzrYl66+3NP29fnfUm5/PdOd2zOtb0j5rPawtLoWNCAAnKTcBXpis/7Of5YVQa2t11vP2rp0YTNobb2Zi9ea+kxRFwEkqvwQ3NR66j5p87xYTxPrSgmHQWGNAGCNAGCNAGCNAGCt80eByksAmjyTGY7Wt+wvdKO+zgcwGRcngkJo7vBdyKR/R8WX9tFunQ2gfHW++FzQS9uZVs8FxaaOX2fS+FDa3Ar/uy+0T+cDuHajp2s3FntVGQG0V2cDKMW42KkRefK3W+cD4EmKx+EwKKwRAKwRAKwRAKwRAKwRAKx1/jBojMUlEIs4Ehq4Hqj1Oh9ACGlNL4K0dDaAcvqN77+d6Yc7M62sNnst0GQsvfpaT5evZI1NXoWz1/kAfvk56qvPp9o43+xPJI0OpBdezHT5SnOzt+HsdTaA0nBFOn8hNP4bYf1BMd0I2q3zAcRYTOSUNzidRzhaZwrz2qAeDoPCGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAWiu+E1z+yEWV7+DOs0ydcZ32fsrbLeP7xPM8Hl3/3nPyAYQgDYfVf+iinAyrt8At7A+qT7xVbsNguJgxPe5+5/mxkPL2oaP7CkkHEII0m0q/3Y0aDqvNv5PnxU+Z3v87LmTOnhCkP/ei7u3E4/s6jXIbdnfO7qU1BOnwULq3EyvPYVTe/nDUzbmPwq2bo+Tf5Oq8DS/yn1Z39+Csn1CpPo7LlPQ7QCnVBz/VcT1K28Z7Fjq6ZwecDgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHA2n951kiCJu/6vQAAAABJRU5ErkJggg==",
+  "base64"
+);
+const EMBEDDED_ICON_512 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAAAD0eNT6AAAJFUlEQVR4nO3YMWpUUQCG0Tv61EK3ILgHO5uQKqRMHaaXNFNYphAEK3txB6lTpcwibNyFCEqIDI4LEARhnDfJd84CHn9xL+/jLlbLm80AAFIezD0AANg9AQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAETXMP4N+9efd4PH+x3+12fbUelxfruWfs1MHRNE5O9/tK/fi+Gednt1v/7vuPT8bTZ4utf5eeb1834+1q+2eUP+33XwQA+C8EAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQJAAAIAgAQAAQQIAAIIEAAAECQAACBIAABAkAAAgSAAAQNA09wDg7js/u517wtYtXz8aL189nHvGX335/Gt8+vBz7hncUV4AACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAgqa5B3A/HR5P4/DY8QLYV14AACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAARNcw/gfrq+Wo/Li/XcM3bq4GgaJ6euFHA3eAEAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAggQAAAQJAAAIEgAAECQAACBIAABAkAAAgCABAABBAgAAghar5c1m7hEAwG55AQCAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEECAACCBAAABAkAAAgSAAAQJAAAIEgAAECQAACAIAEAAEG/AbJWKoWw2uRRAAAAAElFTkSuQmCC",
+  "base64"
+);
+
+const EMBEDDED_ASSETS = new Map([
+  ["/icons/icon-192.png", { buffer: EMBEDDED_ICON_192, contentType: "image/png" }],
+  ["/icons/icon-512.png", { buffer: EMBEDDED_ICON_512, contentType: "image/png" }],
+  ["/apple-touch-icon.png", { buffer: EMBEDDED_ICON_192, contentType: "image/png" }]
+]);
 
 const ADSB_BASE_URL = "https://globe.adsbexchange.com/?icao=";
 const NAVIGATION_WAIT_UNTIL = "domcontentloaded";
@@ -43,7 +60,10 @@ const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
   offlineTimeoutSec: 60,
-  placeMatchRadiusMeters: DEFAULT_PLACE_MATCH_RADIUS_METERS
+  placeMatchRadiusMeters: DEFAULT_PLACE_MATCH_RADIUS_METERS,
+  notificationsEnabled: false,
+  notifyOnTakeoff: true,
+  notifyOnLanding: true
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -332,6 +352,10 @@ function normalizeConfig(raw) {
     normalized.placeMatchRadiusMeters = radius;
   }
 
+  normalized.notificationsEnabled = raw.notificationsEnabled === true;
+  normalized.notifyOnTakeoff = raw.notifyOnTakeoff !== false;
+  normalized.notifyOnLanding = raw.notifyOnLanding !== false;
+
   return normalized;
 }
 
@@ -503,6 +527,87 @@ async function persistEvents() {
   } catch (err) {
     console.error("⚠️ events.json konnte nicht gespeichert werden:", err.message);
   }
+}
+
+function removeEventStreamClient(client) {
+  if (!client) {
+    return;
+  }
+
+  if (client.heartbeat) {
+    clearInterval(client.heartbeat);
+  }
+
+  eventStreamClients.delete(client);
+
+  try {
+    client.res.end();
+  } catch (err) {
+    // ignore
+  }
+}
+
+function broadcastEventToStream(event) {
+  if (!event || eventStreamClients.size === 0) {
+    return;
+  }
+
+  const payload = JSON.stringify({ event });
+  const chunk = `event: event\nid: ${event.id}\ndata: ${payload}\n\n`;
+
+  for (const client of [...eventStreamClients]) {
+    try {
+      client.res.write(chunk);
+    } catch (err) {
+      console.warn("[SSE] Clientverbindung beendet:", err.message);
+      removeEventStreamClient(client);
+    }
+  }
+}
+
+function handleEventStreamRequest(req, res) {
+  if (req.method && req.method.toUpperCase() !== "GET") {
+    sendError(res, 405, "Methode nicht erlaubt.");
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive"
+  });
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  res.write(`retry: ${EVENT_STREAM_HEARTBEAT_INTERVAL_MS}\n`);
+  res.write(`event: init\ndata: ${JSON.stringify({ lastEventId })}\n\n`);
+
+  const client = {
+    res,
+    heartbeat: setInterval(() => {
+      try {
+        res.write(`:keep-alive ${Date.now()}\n\n`);
+      } catch (err) {
+        console.warn("[SSE] Heartbeat fehlgeschlagen:", err.message);
+        removeEventStreamClient(client);
+      }
+    }, EVENT_STREAM_HEARTBEAT_INTERVAL_MS)
+  };
+
+  eventStreamClients.add(client);
+
+  const closeHandler = () => {
+    removeEventStreamClient(client);
+    req.removeListener("close", closeHandler);
+    res.removeListener("close", closeHandler);
+    res.removeListener("error", closeHandler);
+  };
+
+  req.on("close", closeHandler);
+  res.on("close", closeHandler);
+  res.on("error", closeHandler);
 }
 
 function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName, radiusMeters }) {
@@ -760,11 +865,25 @@ function parseConfigPayload(payload) {
     throw new Error("Feld 'placeMatchRadiusMeters' muss größer als 0 sein.");
   }
 
+  const currentConfig = getConfig();
+  const notificationsEnabled = payload.notificationsEnabled !== undefined
+    ? payload.notificationsEnabled === true
+    : !!currentConfig.notificationsEnabled;
+  const notifyOnTakeoff = payload.notifyOnTakeoff !== undefined
+    ? payload.notifyOnTakeoff !== false
+    : currentConfig.notifyOnTakeoff !== false;
+  const notifyOnLanding = payload.notifyOnLanding !== undefined
+    ? payload.notifyOnLanding !== false
+    : currentConfig.notifyOnLanding !== false;
+
   return {
     altitudeThresholdFt: altitude,
     speedThresholdKt: speed,
     offlineTimeoutSec: Math.round(timeout),
-    placeMatchRadiusMeters: radius
+    placeMatchRadiusMeters: radius,
+    notificationsEnabled,
+    notifyOnTakeoff,
+    notifyOnLanding
   };
 }
 
@@ -1371,6 +1490,7 @@ async function registerEvent(type, record, options = {}) {
   }
   events.push(event);
   await persistEvents();
+  broadcastEventToStream(event);
   console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
 }
 
@@ -1842,6 +1962,36 @@ function sendError(res, statusCode, message) {
   sendJSON(res, statusCode, { error: message });
 }
 
+function tryServeEmbeddedAsset(req, res, pathname) {
+  const asset = EMBEDDED_ASSETS.get(pathname);
+  if (!asset) {
+    return false;
+  }
+
+  const method = req.method ? req.method.toUpperCase() : "GET";
+  if (method !== "GET" && method !== "HEAD") {
+    res.writeHead(405, { Allow: "GET, HEAD" });
+    res.end();
+    return true;
+  }
+
+  const headers = {
+    "Content-Type": asset.contentType,
+    "Content-Length": asset.buffer.length,
+    "Cache-Control": "public, max-age=604800, immutable"
+  };
+
+  res.writeHead(200, headers);
+
+  if (method === "HEAD") {
+    res.end();
+  } else {
+    res.end(asset.buffer);
+  }
+
+  return true;
+}
+
 async function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -1960,6 +2110,11 @@ async function handleRequest(req, res) {
 
   if (q.pathname === "/log") {
     await handleLogRequest(q, res);
+    return;
+  }
+
+  if (q.pathname === "/events/stream") {
+    handleEventStreamRequest(req, res);
     return;
   }
 
@@ -2218,6 +2373,10 @@ async function handleRequest(req, res) {
 
   if (q.pathname === "/set") {
     await handleSetRequest(res, q.query.hex);
+    return;
+  }
+
+  if (q.pathname && tryServeEmbeddedAsset(req, res, q.pathname)) {
     return;
   }
 

@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <title>Heli Tracker</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#6F5DF7" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -187,6 +192,9 @@
   <script>
     const HEX_HISTORY_STORAGE_KEY = "heliTrackerHexHistory";
     const DEFAULT_PLACE_RADIUS_FALLBACK_METERS = 500;
+    const DEFAULT_ALTITUDE_THRESHOLD_FT = 300;
+    const DEFAULT_SPEED_THRESHOLD_KT = 40;
+    const DEFAULT_OFFLINE_TIMEOUT_SEC = 60;
     let hexHistory = loadHexHistory();
     let currentHex = "";
     let settingsInterval = null;
@@ -207,6 +215,18 @@
     let activeLogHex = null;
     let activeSettingsSection = "aircraft";
     let eventDetailReturnState = { mode: "overview", groupKey: null };
+    const EVENT_STREAM_RETRY_MS = 5000;
+    const DEFAULT_NOTIFICATION_SETTINGS = {
+      enabled: false,
+      notifyOnTakeoff: true,
+      notifyOnLanding: true
+    };
+    const NOTIFICATION_EVENT_TYPES = new Set(["takeoff", "landing"]);
+    let notificationPreferences = { ...DEFAULT_NOTIFICATION_SETTINGS };
+    let serviceWorkerReadyPromise = null;
+    let eventStreamSource = null;
+    let eventStreamReconnectTimer = null;
+    let lastReceivedEventId = null;
     const navInactiveButtonClasses = ["text-slate-500", "bg-transparent", "shadow-none", "scale-100"];
     const navActiveButtonClasses = [
       "text-brand-purple",
@@ -223,7 +243,7 @@
       "text-brand-purple",
       "shadow-[0_10px_24px_rgba(111,93,247,0.35)]"
     ];
-    const settingsSectionOrder = ["aircraft", "thresholds", "places", "events"];
+    const settingsSectionOrder = ["aircraft", "thresholds", "notifications", "places", "events"];
     const settingsTabActiveClasses = [
       "border-brand-purple/40",
       "bg-white",
@@ -274,6 +294,155 @@
         return "—";
       }
       return suffix ? `${text} ${suffix}` : text;
+    }
+
+    function parseJSONSafe(text) {
+      if (typeof text !== "string") {
+        return null;
+      }
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function isNotificationSupported() {
+      return typeof window !== "undefined"
+        && "Notification" in window
+        && "serviceWorker" in navigator
+        && typeof navigator.serviceWorker !== "undefined";
+    }
+
+    function syncNotificationPreferencesFromConfig(config) {
+      const enabled = !!(config && config.notificationsEnabled);
+      const takeoff = config && Object.prototype.hasOwnProperty.call(config, "notifyOnTakeoff")
+        ? config.notifyOnTakeoff !== false
+        : DEFAULT_NOTIFICATION_SETTINGS.notifyOnTakeoff;
+      const landing = config && Object.prototype.hasOwnProperty.call(config, "notifyOnLanding")
+        ? config.notifyOnLanding !== false
+        : DEFAULT_NOTIFICATION_SETTINGS.notifyOnLanding;
+
+      notificationPreferences = {
+        enabled,
+        notifyOnTakeoff: takeoff,
+        notifyOnLanding: landing
+      };
+    }
+
+    async function ensureServiceWorkerReady() {
+      if (!isNotificationSupported()) {
+        return null;
+      }
+
+      if (!serviceWorkerReadyPromise) {
+        serviceWorkerReadyPromise = (async () => {
+          try {
+            await navigator.serviceWorker.register("/service-worker.js");
+          } catch (err) {
+            console.warn("[Notifications] Service Worker Registrierung fehlgeschlagen:", err);
+          }
+
+          try {
+            return await navigator.serviceWorker.ready;
+          } catch (err) {
+            console.warn("[Notifications] Service Worker wurde nicht aktiv:", err);
+            return null;
+          }
+        })();
+      }
+
+      try {
+        return await serviceWorkerReadyPromise;
+      } catch (err) {
+        console.warn("[Notifications] Service Worker konnte nicht vorbereitet werden:", err);
+        return null;
+      }
+    }
+
+    async function ensureNotificationPermission() {
+      if (!isNotificationSupported()) {
+        return false;
+      }
+
+      if (Notification.permission === "granted") {
+        return true;
+      }
+
+      if (Notification.permission === "denied") {
+        return false;
+      }
+
+      try {
+        const result = await Notification.requestPermission();
+        return result === "granted";
+      } catch (err) {
+        console.warn("[Notifications] Berechtigungsanfrage fehlgeschlagen:", err);
+        return false;
+      }
+    }
+
+    function preloadConfigForNotifications() {
+      return fetchConfig()
+        .then(config => {
+          currentConfigCache = config;
+          syncNotificationPreferencesFromConfig(config);
+          return config;
+        })
+        .catch(err => {
+          console.warn("[Notifications] Konfiguration konnte nicht geladen werden:", err);
+          notificationPreferences = { ...DEFAULT_NOTIFICATION_SETTINGS };
+          return null;
+        });
+    }
+
+    function buildConfigRequestPayload(overrides = {}) {
+      const base = currentConfigCache || {};
+
+      const altitude = parseNumberInput(
+        overrides.altitudeThresholdFt !== undefined
+          ? overrides.altitudeThresholdFt
+          : base.altitudeThresholdFt
+      );
+      const speed = parseNumberInput(
+        overrides.speedThresholdKt !== undefined
+          ? overrides.speedThresholdKt
+          : base.speedThresholdKt
+      );
+      const timeout = parseNumberInput(
+        overrides.offlineTimeoutSec !== undefined
+          ? overrides.offlineTimeoutSec
+          : base.offlineTimeoutSec
+      );
+      const radius = parseNumberInput(
+        overrides.placeMatchRadiusMeters !== undefined
+          ? overrides.placeMatchRadiusMeters
+          : base.placeMatchRadiusMeters
+      );
+
+      return {
+        altitudeThresholdFt: Number.isFinite(altitude) && altitude > 0
+          ? altitude
+          : DEFAULT_ALTITUDE_THRESHOLD_FT,
+        speedThresholdKt: Number.isFinite(speed) && speed >= 0
+          ? speed
+          : DEFAULT_SPEED_THRESHOLD_KT,
+        offlineTimeoutSec: Number.isFinite(timeout) && timeout >= 5
+          ? Math.max(5, Math.round(timeout))
+          : DEFAULT_OFFLINE_TIMEOUT_SEC,
+        placeMatchRadiusMeters: Number.isFinite(radius) && radius > 0
+          ? radius
+          : DEFAULT_PLACE_RADIUS_FALLBACK_METERS,
+        notificationsEnabled: overrides.notificationsEnabled !== undefined
+          ? !!overrides.notificationsEnabled
+          : !!(base && base.notificationsEnabled),
+        notifyOnTakeoff: overrides.notifyOnTakeoff !== undefined
+          ? !!overrides.notifyOnTakeoff
+          : !(base && Object.prototype.hasOwnProperty.call(base, "notifyOnTakeoff")) || base.notifyOnTakeoff !== false,
+        notifyOnLanding: overrides.notifyOnLanding !== undefined
+          ? !!overrides.notifyOnLanding
+          : !(base && Object.prototype.hasOwnProperty.call(base, "notifyOnLanding")) || base.notifyOnLanding !== false
+      };
     }
 
     function normalizeHex(hex) {
@@ -407,6 +576,10 @@
     }
 
     async function initializeTracker() {
+      void ensureServiceWorkerReady();
+      void preloadConfigForNotifications();
+      startEventStream();
+
       const container = document.getElementById("content");
       if (container) {
         container.innerHTML = createStatusCard("Lade Daten...");
@@ -451,6 +624,210 @@
         console.warn("[Init] /log Übersicht konnte nicht geladen werden:", err);
       }
       return null;
+    }
+
+    function scheduleEventStreamReconnect() {
+      if (eventStreamReconnectTimer) {
+        return;
+      }
+      eventStreamReconnectTimer = setTimeout(() => {
+        eventStreamReconnectTimer = null;
+        startEventStream();
+      }, EVENT_STREAM_RETRY_MS);
+    }
+
+    function startEventStream() {
+      if (typeof EventSource === "undefined") {
+        console.warn("[Events] EventSource wird nicht unterstützt. Live-Benachrichtigungen deaktiviert.");
+        return;
+      }
+      if (eventStreamSource) {
+        return;
+      }
+
+      try {
+        const source = new EventSource("/events/stream");
+        eventStreamSource = source;
+
+        source.onopen = () => {
+          if (eventStreamReconnectTimer) {
+            clearTimeout(eventStreamReconnectTimer);
+            eventStreamReconnectTimer = null;
+          }
+        };
+
+        source.addEventListener("init", event => {
+          const payload = parseJSONSafe(event.data) || {};
+          if (payload && payload.lastEventId) {
+            lastReceivedEventId = String(payload.lastEventId);
+          }
+        });
+
+        source.addEventListener("event", event => {
+          if (event && event.lastEventId) {
+            lastReceivedEventId = event.lastEventId;
+          }
+          const payload = parseJSONSafe(event.data);
+          if (payload && payload.event) {
+            processIncomingEvent(payload.event);
+          }
+        });
+
+        source.onerror = err => {
+          console.warn("[Events] Verbindung zum Server-Stream verloren:", err);
+          try {
+            source.close();
+          } catch (closeErr) {
+            console.warn("[Events] EventSource konnte nicht geschlossen werden:", closeErr);
+          }
+          eventStreamSource = null;
+          scheduleEventStreamReconnect();
+        };
+      } catch (err) {
+        console.warn("[Events] Event Stream konnte nicht gestartet werden:", err);
+        eventStreamSource = null;
+        scheduleEventStreamReconnect();
+      }
+    }
+
+    function getEventTypeLabel(event) {
+      const type = event && typeof event.type === "string" ? event.type.toLowerCase() : "";
+      if (type === "takeoff") return "takeoff";
+      if (type === "landing") return "landing";
+      return type;
+    }
+
+    function getEventVerb(event) {
+      const type = getEventTypeLabel(event);
+      if (type === "takeoff") return "gestartet";
+      if (type === "landing") return "gelandet";
+      return "unterwegs";
+    }
+
+    function getEventSubject(event) {
+      if (!event || typeof event !== "object") {
+        return "Unbekanntes Flugzeug";
+      }
+      const callsign = typeof event.callsign === "string" ? event.callsign.trim() : "";
+      if (callsign) {
+        return callsign;
+      }
+      const hex = event.hex ? String(event.hex).trim().toUpperCase() : "";
+      if (hex) {
+        return hex;
+      }
+      return "Unbekanntes Flugzeug";
+    }
+
+    function getEventPlaceLabel(event) {
+      const place = event && event.place ? event.place : null;
+      if (place && typeof place === "object") {
+        const name = typeof place.name === "string" ? place.name.trim() : "";
+        if (name) return name;
+        const city = typeof place.city === "string" ? place.city.trim() : "";
+        if (city) return city;
+        const type = typeof place.type === "string" ? place.type.trim() : "";
+        if (type) return type;
+      }
+      return "der letzten bekannten Position";
+    }
+
+    function shouldNotifyForEvent(event) {
+      if (!notificationPreferences || !notificationPreferences.enabled) {
+        return false;
+      }
+      const type = getEventTypeLabel(event);
+      if (!NOTIFICATION_EVENT_TYPES.has(type)) {
+        return false;
+      }
+      if (type === "takeoff" && !notificationPreferences.notifyOnTakeoff) {
+        return false;
+      }
+      if (type === "landing" && !notificationPreferences.notifyOnLanding) {
+        return false;
+      }
+      return true;
+    }
+
+    function buildNotificationDetails(event) {
+      const subject = getEventSubject(event);
+      const verb = getEventVerb(event);
+      const place = getEventPlaceLabel(event);
+      const title = `${subject} ist ${verb} in der Nähe von ${place}`;
+      const tagId = event && event.id ? String(event.id) : `evt-${Date.now()}`;
+      return {
+        title,
+        options: {
+          body: "Jetzt im Heli Tracker ansehen.",
+          icon: "/icons/icon-192.png",
+          badge: "/icons/icon-192.png",
+          tag: `heli-tracker-${tagId}`,
+          renotify: true,
+          data: { url: window.location.origin }
+        }
+      };
+    }
+
+    async function showNotificationForEvent(event) {
+      if (!shouldNotifyForEvent(event)) {
+        return;
+      }
+      const hasPermission = await ensureNotificationPermission();
+      if (!hasPermission) {
+        return;
+      }
+      const registration = await ensureServiceWorkerReady();
+      if (!registration) {
+        return;
+      }
+
+      const details = buildNotificationDetails(event);
+      try {
+        await registration.showNotification(details.title, details.options);
+      } catch (err) {
+        console.warn("[Notifications] Benachrichtigung konnte nicht angezeigt werden:", err);
+      }
+    }
+
+    function processIncomingEvent(rawEvent) {
+      if (!rawEvent || typeof rawEvent !== "object") {
+        return;
+      }
+
+      const type = getEventTypeLabel(rawEvent);
+      if (!NOTIFICATION_EVENT_TYPES.has(type)) {
+        return;
+      }
+
+      const event = { ...rawEvent };
+      if (event.place && typeof event.place === "object") {
+        event.place = { ...event.place };
+      }
+
+      currentEvents = Array.isArray(currentEvents) ? [...currentEvents] : [];
+      const existingIndex = currentEvents.findIndex(item => item && item.id === event.id);
+      if (existingIndex >= 0) {
+        currentEvents[existingIndex] = event;
+      } else {
+        currentEvents.push(event);
+      }
+
+      currentEventGroups = groupEventsByAircraft(currentEvents);
+
+      if (activeView === "events") {
+        if (eventDetailReturnState.mode === "detail") {
+          renderEventsDetail();
+        } else {
+          renderEventsOverview();
+        }
+      }
+
+      const settingsEventsList = document.getElementById("eventsList");
+      if (settingsEventsList) {
+        renderEventsManagementTable(currentEvents);
+      }
+
+      void showNotificationForEvent(event);
     }
 
     function setCurrentHex(hex) {
@@ -1578,6 +1955,7 @@
           fetchAircraftList()
         ]);
         currentConfigCache = configData;
+        syncNotificationPreferencesFromConfig(currentConfigCache);
         currentPlaces = Array.isArray(placesData) ? placesData : [];
         currentEvents = Array.isArray(eventsData) ? eventsData : [];
         currentAircraft = dedupeAircraftEntries(Array.isArray(aircraftData) ? aircraftData : []);
@@ -1612,6 +1990,7 @@
       const navButtons = [
         { id: "aircraft", label: "Flugzeuge verwalten", description: "Hex setzen, Namen & letzter Datensatz" },
         { id: "thresholds", label: "Schwellwerte", description: "Grenzwerte für Events festlegen" },
+        { id: "notifications", label: "Benachrichtigungen", description: "Push-Benachrichtigungen konfigurieren" },
         { id: "places", label: "Orte verwalten", description: "Eigene Landeplätze pflegen" },
         { id: "events", label: "Events verwalten", description: "Takeoffs & Landings administrieren" }
       ];
@@ -1742,6 +2121,53 @@
               <p id="configMessage" class="mt-2 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
             </section>
           </section>
+          <section data-settings-section="notifications" class="${activeSettingsSection === "notifications" ? "" : "hidden"}">
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-1">
+                <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">iPhone Push</span>
+                <h3 class="text-xl font-semibold text-slate-900">Benachrichtigungen</h3>
+                <p class="text-sm text-slate-500">Erhalte Hinweise, wenn Starts oder Landungen erkannt werden.</p>
+              </div>
+              <div class="mt-6 space-y-5">
+                <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h4 class="text-base font-semibold text-slate-900">Benachrichtigungen aktivieren</h4>
+                      <p id="notificationsSupportHint" class="mt-1 text-xs font-semibold text-slate-500">Prüfe die Berechtigungen deines Geräts.</p>
+                    </div>
+                    <label class="relative inline-flex cursor-pointer items-center">
+                      <input id="notificationsEnabled" type="checkbox" class="peer sr-only" />
+                      <span class="h-11 w-20 rounded-full bg-slate-200 transition-all duration-300 peer-checked:bg-brand-purple/80"></span>
+                      <span class="absolute left-1 top-1 h-9 w-9 rounded-full bg-white shadow-md transition-all duration-300 peer-checked:translate-x-9"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
+                  <h4 class="text-base font-semibold text-slate-900">Auslöser</h4>
+                  <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 shadow-inner shadow-white/40">
+                      <span class="text-sm font-semibold text-slate-700">Takeoff erkannt</span>
+                      <input id="notificationsTakeoff" type="checkbox" class="h-5 w-5 rounded border-slate-300 text-brand-purple focus:ring-brand-purple/60" />
+                    </label>
+                    <label class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 shadow-inner shadow-white/40">
+                      <span class="text-sm font-semibold text-slate-700">Landing erkannt</span>
+                      <input id="notificationsLanding" type="checkbox" class="h-5 w-5 rounded border-slate-300 text-brand-purple focus:ring-brand-purple/60" />
+                    </label>
+                  </div>
+                </div>
+                <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h4 class="text-base font-semibold text-slate-900">Testen</h4>
+                      <p class="text-xs text-slate-500">Sende eine Probe-Benachrichtigung an dein Gerät.</p>
+                    </div>
+                    <button id="notificationsTestButton" type="button" class="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-purple/90 hover:shadow-brand-purple/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70">Test Benachrichtigung</button>
+                  </div>
+                </div>
+              </div>
+              <p id="notificationsMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+            </section>
+          </section>
           <section data-settings-section="places" class="${activeSettingsSection === "places" ? "" : "hidden"}">
             <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
               <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
@@ -1833,6 +2259,9 @@
       if (timeoutInput) timeoutInput.value = safeConfig.offlineTimeoutSec || "";
       if (radiusInput) radiusInput.value = safeConfig.placeMatchRadiusMeters || "";
 
+      initializeNotificationSettingsControls();
+      updateNotificationControlsFromState();
+
       const hexInput = document.getElementById("hexInput");
       if (hexInput) {
         hexInput.addEventListener("input", handleHexInputChange);
@@ -1848,6 +2277,203 @@
       updateSettingsSectionVisibility();
     }
 
+    function initializeNotificationSettingsControls() {
+      const enabledInput = document.getElementById("notificationsEnabled");
+      const takeoffInput = document.getElementById("notificationsTakeoff");
+      const landingInput = document.getElementById("notificationsLanding");
+      const testButton = document.getElementById("notificationsTestButton");
+
+      if (enabledInput) {
+        enabledInput.addEventListener("change", handleNotificationsEnabledChange);
+      }
+      if (takeoffInput) {
+        takeoffInput.addEventListener("change", handleNotificationsTakeoffChange);
+      }
+      if (landingInput) {
+        landingInput.addEventListener("change", handleNotificationsLandingChange);
+      }
+      if (testButton) {
+        testButton.addEventListener("click", triggerNotificationTest);
+      }
+    }
+
+    function updateNotificationSupportHint() {
+      const hint = document.getElementById("notificationsSupportHint");
+      if (!hint) {
+        return;
+      }
+
+      const baseClass = "mt-1 text-xs font-semibold";
+      if (!isNotificationSupported()) {
+        hint.className = `${baseClass} text-rose-500`;
+        hint.textContent = "Benachrichtigungen werden von diesem Gerät oder Browser nicht unterstützt.";
+        return;
+      }
+
+      if (Notification.permission === "denied") {
+        hint.className = `${baseClass} text-rose-500`;
+        hint.textContent = "Benachrichtigungen sind blockiert. Bitte in den Einstellungen freigeben.";
+      } else if (Notification.permission === "granted") {
+        hint.className = `${baseClass} text-emerald-600`;
+        hint.textContent = "Bereit für Benachrichtigungen. Du kannst die Auslöser unten wählen.";
+      } else {
+        hint.className = `${baseClass} text-slate-500`;
+        hint.textContent = "Erlaube Benachrichtigungen, um Push-Hinweise auf deinem iPhone zu erhalten.";
+      }
+    }
+
+    function updateNotificationControlsFromState() {
+      const enabledInput = document.getElementById("notificationsEnabled");
+      const takeoffInput = document.getElementById("notificationsTakeoff");
+      const landingInput = document.getElementById("notificationsLanding");
+
+      const supported = isNotificationSupported();
+      const permissionDenied = supported && typeof Notification !== "undefined" && Notification.permission === "denied";
+      const enabled = supported && !permissionDenied && !!(notificationPreferences && notificationPreferences.enabled);
+
+      if (enabledInput) {
+        enabledInput.checked = enabled;
+        enabledInput.disabled = !supported || permissionDenied;
+      }
+
+      if (takeoffInput) {
+        takeoffInput.checked = !!(notificationPreferences && notificationPreferences.notifyOnTakeoff);
+        takeoffInput.disabled = !supported || !enabled;
+      }
+
+      if (landingInput) {
+        landingInput.checked = !!(notificationPreferences && notificationPreferences.notifyOnLanding);
+        landingInput.disabled = !supported || !enabled;
+      }
+
+      updateNotificationSupportHint();
+    }
+
+    function showNotificationMessage(message, type = "") {
+      const el = document.getElementById("notificationsMessage");
+      if (!el) return;
+      let color = "text-slate-500";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-500";
+      }
+      el.className = `mt-4 min-h-[1.5rem] text-sm font-semibold ${color}`;
+      el.textContent = message || "";
+    }
+
+    async function persistNotificationPreferences() {
+      if (!currentConfigCache) {
+        currentConfigCache = {};
+      }
+      showNotificationMessage("Speichere...", "");
+      const payload = buildConfigRequestPayload({
+        notificationsEnabled: notificationPreferences.enabled,
+        notifyOnTakeoff: notificationPreferences.notifyOnTakeoff,
+        notifyOnLanding: notificationPreferences.notifyOnLanding
+      });
+
+      try {
+        const res = await fetch("/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data && data.error ? data.error : `Serverantwort ${res.status}`);
+        }
+
+        currentConfigCache = data;
+        syncNotificationPreferencesFromConfig(data);
+        updateNotificationControlsFromState();
+        showNotificationMessage("Benachrichtigungseinstellungen gespeichert.", "success");
+      } catch (err) {
+        console.error("[Notifications] Speichern fehlgeschlagen:", err);
+        syncNotificationPreferencesFromConfig(currentConfigCache || {});
+        updateNotificationControlsFromState();
+        const message = err && err.message ? err.message : String(err);
+        showNotificationMessage(`Speichern fehlgeschlagen: ${message}`, "error");
+      }
+    }
+
+    async function handleNotificationsEnabledChange(event) {
+      if (!isNotificationSupported()) {
+        if (event && event.target) {
+          event.target.checked = false;
+        }
+        showNotificationMessage("Benachrichtigungen werden nicht unterstützt.", "error");
+        return;
+      }
+
+      const checked = !!(event && event.target && event.target.checked);
+      if (checked) {
+        const granted = await ensureNotificationPermission();
+        if (!granted) {
+          if (event && event.target) {
+            event.target.checked = false;
+          }
+          notificationPreferences.enabled = false;
+          updateNotificationControlsFromState();
+          showNotificationMessage("Berechtigung nicht erteilt. Bitte in den Einstellungen freigeben.", "error");
+          return;
+        }
+        notificationPreferences.enabled = true;
+      } else {
+        notificationPreferences.enabled = false;
+      }
+
+      updateNotificationControlsFromState();
+      await persistNotificationPreferences();
+    }
+
+    async function handleNotificationsTakeoffChange(event) {
+      notificationPreferences.notifyOnTakeoff = !!(event && event.target && event.target.checked);
+      updateNotificationControlsFromState();
+      await persistNotificationPreferences();
+    }
+
+    async function handleNotificationsLandingChange(event) {
+      notificationPreferences.notifyOnLanding = !!(event && event.target && event.target.checked);
+      updateNotificationControlsFromState();
+      await persistNotificationPreferences();
+    }
+
+    async function triggerNotificationTest() {
+      if (!isNotificationSupported()) {
+        showNotificationMessage("Benachrichtigungen werden nicht unterstützt.", "error");
+        return;
+      }
+
+      const granted = await ensureNotificationPermission();
+      updateNotificationSupportHint();
+      if (!granted) {
+        showNotificationMessage("Bitte erlaube Benachrichtigungen, um den Test zu nutzen.", "error");
+        return;
+      }
+
+      const registration = await ensureServiceWorkerReady();
+      if (!registration) {
+        showNotificationMessage("Service Worker konnte nicht vorbereitet werden.", "error");
+        return;
+      }
+
+      try {
+        await registration.showNotification("Testbenachrichtigung", {
+          body: "Dies ist eine Probe für Push-Mitteilungen des Heli Trackers.",
+          icon: "/icons/icon-192.png",
+          badge: "/icons/icon-192.png",
+          tag: `heli-tracker-test-${Date.now()}`,
+          data: { url: window.location.origin }
+        });
+        showNotificationMessage("Testbenachrichtigung wurde gesendet.", "success");
+      } catch (err) {
+        console.error("[Notifications] Testbenachrichtigung fehlgeschlagen:", err);
+        const message = err && err.message ? err.message : String(err);
+        showNotificationMessage(`Test fehlgeschlagen: ${message}`, "error");
+      }
+    }
+
     async function fetchConfig() {
       const res = await fetch("/config");
       if (!res.ok) {
@@ -1858,11 +2484,21 @@
       const speed = Number(data.speedThresholdKt);
       const timeout = Number(data.offlineTimeoutSec);
       const radius = Number(data.placeMatchRadiusMeters);
+      const notificationsEnabled = !!(data && data.notificationsEnabled);
+      const notifyOnTakeoff = data && Object.prototype.hasOwnProperty.call(data, "notifyOnTakeoff")
+        ? data.notifyOnTakeoff !== false
+        : true;
+      const notifyOnLanding = data && Object.prototype.hasOwnProperty.call(data, "notifyOnLanding")
+        ? data.notifyOnLanding !== false
+        : true;
       return {
         altitudeThresholdFt: Number.isFinite(altitude) ? altitude : 0,
         speedThresholdKt: Number.isFinite(speed) ? speed : 0,
         offlineTimeoutSec: Number.isFinite(timeout) ? timeout : 0,
-        placeMatchRadiusMeters: Number.isFinite(radius) ? radius : 0
+        placeMatchRadiusMeters: Number.isFinite(radius) ? radius : 0,
+        notificationsEnabled,
+        notifyOnTakeoff,
+        notifyOnLanding
       };
     }
 
@@ -2414,15 +3050,19 @@
       showConfigMessage("Speichere...", "");
 
       try {
+        const payload = buildConfigRequestPayload({
+          altitudeThresholdFt: altitude,
+          speedThresholdKt: speed,
+          offlineTimeoutSec: timeout,
+          placeMatchRadiusMeters: radius,
+          notificationsEnabled: notificationPreferences.enabled,
+          notifyOnTakeoff: notificationPreferences.notifyOnTakeoff,
+          notifyOnLanding: notificationPreferences.notifyOnLanding
+        });
         const res = await fetch("/config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            altitudeThresholdFt: altitude,
-            speedThresholdKt: speed,
-            offlineTimeoutSec: timeout,
-            placeMatchRadiusMeters: radius
-          })
+          body: JSON.stringify(payload)
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -2442,6 +3082,9 @@
         if (radiusInput && data.placeMatchRadiusMeters !== undefined) {
           radiusInput.value = data.placeMatchRadiusMeters;
         }
+
+        syncNotificationPreferencesFromConfig(data);
+        updateNotificationControlsFromState();
 
         await refreshPlaces();
         await refreshEventsForSettings(false);
