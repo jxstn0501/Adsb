@@ -204,6 +204,8 @@
     let activeEventGroupKey = null;
     let cachedLogOverview = [];
     let activeLogHex = null;
+    let activeSettingsSection = "aircraft";
+    let eventDetailReturnState = { mode: "overview", groupKey: null };
     const navInactiveButtonClasses = ["text-slate-500", "bg-transparent", "shadow-none", "scale-100"];
     const navActiveButtonClasses = [
       "text-brand-purple",
@@ -219,6 +221,18 @@
       "to-brand-red/20",
       "text-brand-purple",
       "shadow-[0_10px_24px_rgba(111,93,247,0.35)]"
+    ];
+    const settingsSectionOrder = ["aircraft", "thresholds", "places", "events"];
+    const settingsTabActiveClasses = [
+      "border-brand-purple/40",
+      "bg-white",
+      "text-brand-purple",
+      "shadow-[0_12px_28px_rgba(111,93,247,0.18)]"
+    ];
+    const settingsTabInactiveClasses = [
+      "border-transparent",
+      "bg-white/60",
+      "text-slate-500"
     ];
     const viewTitleMap = {
       map: "Live Map",
@@ -264,6 +278,37 @@
     function normalizeHex(hex) {
       if (typeof hex !== "string") return "";
       return hex.trim().toLowerCase();
+    }
+
+    function dedupeAircraftEntries(list) {
+      if (!Array.isArray(list)) {
+        return [];
+      }
+
+      const map = new Map();
+
+      list.forEach(entry => {
+        if (!entry || typeof entry !== "object") {
+          return;
+        }
+
+        const normalizedHex = normalizeHex(entry.hex);
+        if (!normalizedHex) {
+          return;
+        }
+
+        const candidate = { ...entry, hex: normalizedHex };
+        if (typeof candidate.name === "string") {
+          candidate.name = candidate.name.trim();
+          if (!candidate.name) {
+            delete candidate.name;
+          }
+        }
+
+        map.set(normalizedHex, candidate);
+      });
+
+      return Array.from(map.values());
     }
 
     function getAircraftEntry(hex) {
@@ -325,6 +370,39 @@
           }
         }
       });
+    }
+
+    function updateSettingsSectionVisibility() {
+      const sections = document.querySelectorAll('[data-settings-section]');
+      sections.forEach(section => {
+        if (!section || !section.dataset) return;
+        if (section.dataset.settingsSection === activeSettingsSection) {
+          section.classList.remove("hidden");
+        } else {
+          section.classList.add("hidden");
+        }
+      });
+
+      const tabs = document.querySelectorAll('[data-settings-tab]');
+      tabs.forEach(tab => {
+        if (!tab || !tab.dataset) return;
+        tab.classList.remove(...settingsTabActiveClasses, ...settingsTabInactiveClasses);
+        const isActive = tab.dataset.settingsTab === activeSettingsSection;
+        if (isActive) {
+          tab.classList.add(...settingsTabActiveClasses);
+          tab.setAttribute("aria-current", "true");
+        } else {
+          tab.classList.add(...settingsTabInactiveClasses);
+          tab.removeAttribute("aria-current");
+        }
+      });
+    }
+
+    function selectSettingsSection(sectionId) {
+      const fallback = settingsSectionOrder[0] || "aircraft";
+      const target = settingsSectionOrder.includes(sectionId) ? sectionId : fallback;
+      activeSettingsSection = target;
+      updateSettingsSectionVisibility();
     }
 
     async function initializeTracker() {
@@ -436,7 +514,7 @@
         </section>`;
     }
 
-    function openEventFromEncoded(encodedEvent) {
+    function openEventFromEncoded(encodedEvent, encodedGroupKey = "") {
       if (typeof encodedEvent !== "string" || !encodedEvent) {
         console.warn("[Events] Kein Event ausgewählt.");
         return;
@@ -445,6 +523,26 @@
       try {
         const decoded = decodeURIComponent(encodedEvent);
         const payload = JSON.parse(decoded);
+
+        let groupKey = "";
+        if (typeof encodedGroupKey === "string" && encodedGroupKey) {
+          try {
+            groupKey = decodeURIComponent(encodedGroupKey);
+          } catch (err) {
+            console.warn("[Events] Gruppenschlüssel konnte nicht dekodiert werden:", err);
+          }
+        }
+
+        if (!groupKey && typeof activeEventGroupKey === "string" && activeEventGroupKey) {
+          groupKey = activeEventGroupKey;
+        }
+
+        if (groupKey) {
+          eventDetailReturnState = { mode: "group", groupKey };
+        } else {
+          eventDetailReturnState = { mode: "overview", groupKey: null };
+        }
+
         renderEventDetail(payload);
       } catch (err) {
         console.error("[Events] Event konnte nicht geöffnet werden:", err);
@@ -506,7 +604,7 @@
             <div class="flex items-center gap-3">
               <button
                 type="button"
-                onclick="showEvents()"
+                onclick="handleEventDetailBack()"
                 class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-brand-purple/20 bg-white px-3 text-brand-purple shadow-sm transition-transform duration-300 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/60"
                 aria-label="Zurück zu den Events"
               >
@@ -635,6 +733,7 @@
       setActiveView("events");
       closeSidebar();
       cleanupEventMap();
+      eventDetailReturnState = { mode: "overview", groupKey: null };
 
       const container = document.getElementById("content");
       if (!container) return;
@@ -659,11 +758,12 @@
 
         currentEvents = events;
         if (Array.isArray(aircraftData)) {
-          currentAircraft = aircraftData;
+          currentAircraft = dedupeAircraftEntries(aircraftData);
         }
 
         currentEventGroups = groupEventsByAircraft(events);
         activeEventGroupKey = null;
+        eventDetailReturnState = { mode: "overview", groupKey: null };
         renderEventsOverview();
       } catch (err) {
         console.error("[Events] Liste konnte nicht geladen werden:", err);
@@ -720,6 +820,7 @@
     function renderEventsOverview() {
       const container = document.getElementById("content");
       if (!container) return;
+      eventDetailReturnState = { mode: "overview", groupKey: null };
 
       if (!Array.isArray(currentEventGroups) || currentEventGroups.length === 0) {
         container.innerHTML = `
@@ -832,11 +933,13 @@
       if (!key) return;
 
       activeEventGroupKey = key;
+      eventDetailReturnState = { mode: "group", groupKey: key };
       renderEventsDetail();
     }
 
     function returnToEventsOverview() {
       activeEventGroupKey = null;
+      eventDetailReturnState = { mode: "overview", groupKey: null };
       renderEventsOverview();
     }
 
@@ -856,6 +959,8 @@
         return;
       }
 
+      eventDetailReturnState = { mode: "group", groupKey: group.key };
+
       const events = getSortedEventsForGroup(group.events);
       const displayName = getAircraftDisplayName(group.hex, group.callsign || group.hex || "");
       const hexLabel = group.hex ? group.hex.toUpperCase() : "—";
@@ -864,7 +969,7 @@
       const landingCount = events.filter(event => typeof event?.type === "string" && event.type.toLowerCase() === "landing").length;
       const latestTime = latest ? formatDateTime(latest.time) : "—";
       const cards = events.length > 0
-        ? events.map(buildEventCardHtml).join("")
+        ? events.map(event => buildEventCardHtml(event, group.key)).join("")
         : createEmptyCard("Keine Events für dieses Flugzeug.");
 
       container.innerHTML = `
@@ -897,7 +1002,24 @@
         </section>`;
     }
 
-    function buildEventCardHtml(event) {
+    function handleEventDetailBack() {
+      const targetKey = eventDetailReturnState && eventDetailReturnState.mode === "group"
+        ? eventDetailReturnState.groupKey
+        : null;
+
+      if (targetKey && Array.isArray(currentEventGroups)) {
+        const exists = currentEventGroups.some(entry => entry && entry.key === targetKey);
+        if (exists) {
+          activeEventGroupKey = targetKey;
+          renderEventsDetail();
+          return;
+        }
+      }
+
+      showEvents();
+    }
+
+    function buildEventCardHtml(event, groupKey = "") {
       if (!event) return "";
 
       const typeRaw = typeof event.type === "string" ? event.type : "";
@@ -934,6 +1056,10 @@
         place: event.place ?? null
       };
       const encodedEvent = encodeURIComponent(JSON.stringify(eventPayload));
+      const encodedGroupKey = groupKey ? encodeURIComponent(groupKey) : "";
+      const openArgs = encodedGroupKey
+        ? `'${encodedEvent}', '${encodedGroupKey}'`
+        : `'${encodedEvent}'`;
 
       const iconBackground = isLanding
         ? "bg-emerald-500 text-white shadow-[0_10px_20px_rgba(16,185,129,0.35)]"
@@ -945,7 +1071,7 @@
       const buttonDisabled = !hasCoords;
       const buttonAttributes = buttonDisabled
         ? 'type="button" disabled'
-        : `type="button" onclick="openEventFromEncoded('${encodedEvent}')"`;
+        : `type="button" onclick="openEventFromEncoded(${openArgs})"`;
 
       const buttonClasses = buttonDisabled
         ? "inline-flex items-center justify-between gap-2 rounded-2xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400"
@@ -1335,6 +1461,7 @@
           currentAircraft = Array.isArray(currentAircraft) ? currentAircraft : [];
           currentAircraft = currentAircraft.filter(entry => normalizeHex(entry && entry.hex) !== savedHex);
           currentAircraft.push({ ...aircraftPayload, hex: savedHex, name: savedName });
+          currentAircraft = dedupeAircraftEntries(currentAircraft);
           renderAircraftList(currentAircraft);
           updateAircraftFormState();
           renderHexHistoryDropdown();
@@ -1441,6 +1568,7 @@
       setActiveView("settings");
       closeSidebar();
       cleanupEventMap();
+      activeSettingsSection = settingsSectionOrder[0] || "aircraft";
 
       const container = document.getElementById("content");
       if (container) {
@@ -1457,7 +1585,7 @@
         currentConfigCache = configData;
         currentPlaces = Array.isArray(placesData) ? placesData : [];
         currentEvents = Array.isArray(eventsData) ? eventsData : [];
-        currentAircraft = Array.isArray(aircraftData) ? aircraftData : [];
+        currentAircraft = dedupeAircraftEntries(Array.isArray(aircraftData) ? aircraftData : []);
         editingPlaceId = null;
         editingAircraftHex = null;
         renderSettingsView(currentConfigCache, currentPlaces, currentEvents, currentAircraft);
@@ -1477,197 +1605,247 @@
       if (!container) return;
 
       const safeConfig = config || {};
-      const html = `<div class="settings space-y-6">
-        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
-          <div class="flex flex-col gap-1">
-            <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Live Ziel</span>
-            <h3 class="text-xl font-semibold text-slate-900">Flugzeug setzen</h3>
-            <p class="text-sm text-slate-500">Wähle die aktuelle ICAO Hex für den Live-Feed.</p>
+
+      currentPlaces = Array.isArray(places) ? places : [];
+      currentEvents = Array.isArray(events) ? events : [];
+      currentAircraft = dedupeAircraftEntries(Array.isArray(aircraftList) ? aircraftList : []);
+
+      if (!settingsSectionOrder.includes(activeSettingsSection)) {
+        activeSettingsSection = settingsSectionOrder[0] || "aircraft";
+      }
+
+      const navButtons = [
+        { id: "aircraft", label: "Flugzeuge verwalten", description: "Hex setzen, Namen & letzter Datensatz" },
+        { id: "thresholds", label: "Schwellwerte", description: "Grenzwerte für Events festlegen" },
+        { id: "places", label: "Orte verwalten", description: "Eigene Landeplätze pflegen" },
+        { id: "events", label: "Events verwalten", description: "Takeoffs & Landings administrieren" }
+      ];
+
+      const navHtml = `
+        <div class="rounded-3xl bg-white/80 px-4 py-4 shadow-card ring-1 ring-white/40 backdrop-blur">
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            ${navButtons.map(button => `
+              <button
+                type="button"
+                data-settings-tab="${button.id}"
+                onclick="selectSettingsSection('${button.id}')"
+                class="settings-tab flex flex-col items-start gap-1 rounded-2xl border px-4 py-3 text-left transition duration-300">
+                <span class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">${button.label}</span>
+                <span class="text-[0.75rem] font-medium text-slate-600">${button.description}</span>
+              </button>
+            `).join("")}
           </div>
-          <div class="mt-6 space-y-4">
-            <div>
-              <label for="hexInput" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">ICAO Hex</label>
-              <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
-            </div>
-            <p id="hexNameInfo" class="hidden text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"></p>
-            <div id="hexNameWrapper" class="hidden">
-              <label for="hexNameInput" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Name des Flugzeugs</label>
-              <input id="hexNameInput" type="text" placeholder="z. B. Rettungshubschrauber" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
-              <p class="mt-2 text-xs text-slate-500">Dieser Name wird für die Übersicht gespeichert.</p>
-            </div>
-            <div id="hexHistoryWrapper" class="hidden space-y-2">
-              <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="hexHistorySelect">Gespeicherte Hex</label>
-              <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <select id="hexHistorySelect" class="flex-1 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" onchange="handleHexHistorySelection(event)"></select>
-                <button type="button" class="inline-flex items-center justify-center rounded-full border border-brand-red/30 bg-white/80 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red shadow-inner shadow-white/60 transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="clearHexHistory()">Liste löschen</button>
+        </div>
+      `;
+
+      const html = `
+        <div class="settings space-y-6">
+          ${navHtml}
+          <section data-settings-section="aircraft" class="space-y-6 ${activeSettingsSection === "aircraft" ? "" : "hidden"}">
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-1">
+                <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Live Ziel</span>
+                <h3 class="text-xl font-semibold text-slate-900">Flugzeug setzen</h3>
+                <p class="text-sm text-slate-500">Wähle die aktuelle ICAO Hex für den Live-Feed.</p>
               </div>
-            </div>
-            <button class="inline-flex w-full items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" onclick="applyHex()">Flugzeug setzen</button>
-            <p id="hexStatus" class="min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-          </div>
-        </section>
-        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
-          <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Flottenübersicht</span>
-              <h3 class="text-xl font-semibold text-slate-900">Flugzeuge verwalten</h3>
-              <p class="text-sm text-slate-500">Benenne gespeicherte Hex-Codes um und behalte den Überblick.</p>
-            </div>
-            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshAircraftList()">
-              Aktualisieren
-            </button>
-          </div>
-          <div id="aircraftList" class="mt-6 space-y-3"></div>
-          <p id="aircraftEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Flugzeuge gespeichert.</p>
-          <p id="aircraftMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-          <form id="aircraftForm" onsubmit="submitAircraft(event)" class="mt-6 rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
-            <h4 id="aircraftFormTitle" class="text-lg font-semibold text-slate-900">Flugzeug auswählen</h4>
-            <p id="aircraftFormHelper" class="mt-2 text-sm text-slate-500">Wähle ein Flugzeug aus der Liste zum Bearbeiten.</p>
-            <div class="mt-4 space-y-4">
-              <div>
-                <span class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">HEX</span>
-                <div id="aircraftHexDisplay" class="mt-2 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base font-semibold text-slate-900 shadow-inner shadow-white/40">—</div>
-              </div>
-              <div>
-                <label for="aircraftName" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Name</label>
-                <input id="aircraftName" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" disabled />
-              </div>
-            </div>
-            <div class="mt-6 flex flex-wrap items-center gap-3">
-              <button id="aircraftSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" disabled>Speichern</button>
-              <button id="aircraftCancel" type="button" class="hidden rounded-2xl border border-brand-red/30 bg-white/70 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="cancelAircraftEdit()">Abbrechen</button>
-            </div>
-            <p id="aircraftFormMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-          </form>
-        </section>
-        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Telemetry Snapshot</span>
-              <h3 class="text-xl font-semibold text-slate-900">Letzter Datensatz</h3>
-            </div>
-            <span id="latestTimestamp" class="inline-flex items-center rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40">—</span>
-          </div>
-          <div id="latestGrid" class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"></div>
-          <p id="latestEmpty" class="mt-4 hidden text-sm text-slate-500">Noch kein Datensatz verfügbar.</p>
-        </section>
-        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
-          <div class="flex flex-col gap-1">
-            <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Überwachung</span>
-            <h3 class="text-xl font-semibold text-slate-900">Schwellwerte</h3>
-            <p class="text-sm text-slate-500">Passe die Trigger für Events und Warnungen an.</p>
-          </div>
-          <form id="configForm" onsubmit="submitConfig(event)" class="mt-6 space-y-5">
-            <div class="grid gap-4 md:grid-cols-3">
-              <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
-                <label for="cfgAltitude" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Höhen-Schwelle (ft)</label>
-                <input id="cfgAltitude" type="number" min="1" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
-              </div>
-              <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
-                <label for="cfgSpeed" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Geschwindigkeits-Schwelle (kt)</label>
-                <input id="cfgSpeed" type="number" min="0" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
-              </div>
-              <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
-                <label for="cfgTimeout" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Offline-Timeout (Sek.)</label>
-                <input id="cfgTimeout" type="number" min="5" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
-              </div>
-            </div>
-            <button type="submit" class="inline-flex w-full items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Konfiguration speichern</button>
-          </form>
-          <p id="configMessage" class="mt-2 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-        </section>
-        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
-          <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Orte verwalten</span>
-              <h3 class="text-xl font-semibold text-slate-900">Orte</h3>
-              <p class="text-sm text-slate-500">Verwalte deine eigenen Landeplätze und Referenzpunkte.</p>
-            </div>
-            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshPlaces()">
-              Aktualisieren
-            </button>
-          </div>
-          <div id="placesList" class="mt-6 space-y-3"></div>
-          <p id="placesEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Orte vorhanden.</p>
-          <div class="mt-8 grid gap-4 lg:grid-cols-2">
-            <form id="placeForm" onsubmit="submitPlace(event)" class="rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
-              <h4 id="placeFormTitle" class="text-lg font-semibold text-slate-900">Neuen Ort hinzufügen</h4>
-              <div class="mt-4 space-y-4">
+              <div class="mt-6 space-y-4">
                 <div>
-                  <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeName">Name</label>
-                  <input id="placeName" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                  <label for="hexInput" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">ICAO Hex</label>
+                  <input id="hexInput" type="text" placeholder="ICAO Hex" value="${escapeHtml(currentHex)}" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
                 </div>
-                <div>
-                  <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeType">Typ</label>
-                  <input id="placeType" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                <p id="hexNameInfo" class="hidden text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"></p>
+                <div id="hexNameWrapper" class="hidden">
+                  <label for="hexNameInput" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Name des Flugzeugs</label>
+                  <input id="hexNameInput" type="text" placeholder="z. B. Rettungshubschrauber" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 shadow-inner shadow-white/40 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" />
+                  <p class="mt-2 text-xs text-slate-500">Dieser Name wird für die Übersicht gespeichert.</p>
                 </div>
-                <div class="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeLat">Lat</label>
-                    <input id="placeLat" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
-                  </div>
-                  <div>
-                    <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeLon">Lon</label>
-                    <input id="placeLon" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                <div id="hexHistoryWrapper" class="hidden space-y-2">
+                  <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="hexHistorySelect">Gespeicherte Hex</label>
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <select id="hexHistorySelect" class="flex-1 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" onchange="handleHexHistorySelection(event)"></select>
+                    <button type="button" class="inline-flex items-center justify-center rounded-full border border-brand-red/30 bg-white/80 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red shadow-inner shadow-white/60 transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="clearHexHistory()">Liste löschen</button>
                   </div>
                 </div>
+                <button class="inline-flex w-full items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" onclick="applyHex()">Flugzeug setzen</button>
+                <p id="hexStatus" class="min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
               </div>
-              <div class="mt-6 flex flex-wrap items-center gap-3">
-                <button id="placeSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Hinzufügen</button>
-                <button id="placeCancel" type="button" class="hidden rounded-2xl border border-brand-red/30 bg-white/70 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="cancelPlaceEdit()">Abbrechen</button>
+            </section>
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Flottenübersicht</span>
+                  <h3 class="text-xl font-semibold text-slate-900">Flugzeuge verwalten</h3>
+                  <p class="text-sm text-slate-500">Benenne gespeicherte Hex-Codes um und behalte den Überblick.</p>
+                </div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshAircraftList()">
+                  Aktualisieren
+                </button>
               </div>
-              <p id="placeFormMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-            </form>
-            <div class="rounded-3xl border border-slate-100/70 bg-brand-frost/70 px-6 py-6 shadow-inner shadow-white/60">
-              <h4 class="text-lg font-semibold text-slate-900">Ort suchen</h4>
-              <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-                <input id="placeSearch" type="text" placeholder="Ort suchen" class="flex-1 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" onkeydown="handlePlaceSearchKey(event)" />
-                <button type="button" class="inline-flex items-center justify-center rounded-2xl bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-purple/90 hover:shadow-brand-purple/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70" onclick="searchPlaceInOSM()">Suche</button>
+              <div id="aircraftList" class="mt-6 space-y-3"></div>
+              <p id="aircraftEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Flugzeuge gespeichert.</p>
+              <p id="aircraftMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+              <form id="aircraftForm" onsubmit="submitAircraft(event)" class="mt-6 rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
+                <h4 id="aircraftFormTitle" class="text-lg font-semibold text-slate-900">Flugzeug auswählen</h4>
+                <p id="aircraftFormHelper" class="mt-2 text-sm text-slate-500">Wähle ein Flugzeug aus der Liste zum Bearbeiten.</p>
+                <div class="mt-4 space-y-4">
+                  <div>
+                    <span class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">HEX</span>
+                    <div id="aircraftHexDisplay" class="mt-2 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base font-semibold text-slate-900 shadow-inner shadow-white/40">—</div>
+                  </div>
+                  <div>
+                    <label for="aircraftName" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Name</label>
+                    <input id="aircraftName" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" disabled />
+                  </div>
+                </div>
+                <div class="mt-6 flex flex-wrap items-center gap-3">
+                  <button id="aircraftSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70" disabled>Speichern</button>
+                  <button id="aircraftCancel" type="button" class="hidden rounded-2xl border border-brand-red/30 bg-white/70 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="cancelAircraftEdit()">Abbrechen</button>
+                </div>
+                <p id="aircraftFormMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+              </form>
+            </section>
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Telemetry Snapshot</span>
+                  <h3 class="text-xl font-semibold text-slate-900">Letzter Datensatz</h3>
+                </div>
+                <span id="latestTimestamp" class="inline-flex items-center rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40">—</span>
               </div>
-              <p id="placeSearchStatus" class="mt-3 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-              <div id="placeSearchResults" class="mt-4 flex flex-col gap-3"></div>
-            </div>
-          </div>
-        </section>
-        <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
-          <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Events</span>
-              <h3 class="text-xl font-semibold text-slate-900">Events verwalten</h3>
-              <p class="text-sm text-slate-500">Lösche erkannte Takeoff- und Landing-Events.</p>
-            </div>
-            <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshEventsForSettings()">
-              Aktualisieren
-            </button>
-          </div>
-          <div id="eventsList" class="mt-6 space-y-3"></div>
-          <p id="eventsEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Events vorhanden.</p>
-          <p id="eventsMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
-        </section>
-      </div>`;
+              <div id="latestGrid" class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"></div>
+              <p id="latestEmpty" class="mt-4 hidden text-sm text-slate-500">Noch kein Datensatz verfügbar.</p>
+            </section>
+          </section>
+          <section data-settings-section="thresholds" class="${activeSettingsSection === "thresholds" ? "" : "hidden"}">
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-1">
+                <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Überwachung</span>
+                <h3 class="text-xl font-semibold text-slate-900">Schwellwerte</h3>
+                <p class="text-sm text-slate-500">Passe die Trigger für Events und Warnungen an.</p>
+              </div>
+              <form id="configForm" onsubmit="submitConfig(event)" class="mt-6 space-y-5">
+                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
+                    <label for="cfgAltitude" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Höhen-Schwelle (ft)</label>
+                    <input id="cfgAltitude" type="number" min="1" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
+                  </div>
+                  <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
+                    <label for="cfgSpeed" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Geschwindigkeits-Schwelle (kt)</label>
+                    <input id="cfgSpeed" type="number" min="0" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
+                  </div>
+                  <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
+                    <label for="cfgTimeout" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Offline-Timeout (Sek.)</label>
+                    <input id="cfgTimeout" type="number" min="5" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
+                  </div>
+                  <div class="group rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50 transition focus-within:border-brand-purple/40 focus-within:shadow-brand-purple/10">
+                    <label for="cfgRadius" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Radius für Ortszuordnung (m)</label>
+                    <input id="cfgRadius" type="number" min="1" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
+                  </div>
+                </div>
+                <button type="submit" class="inline-flex w-full items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Konfiguration speichern</button>
+              </form>
+              <p id="configMessage" class="mt-2 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+            </section>
+          </section>
+          <section data-settings-section="places" class="${activeSettingsSection === "places" ? "" : "hidden"}">
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Orte verwalten</span>
+                  <h3 class="text-xl font-semibold text-slate-900">Orte</h3>
+                  <p class="text-sm text-slate-500">Verwalte deine eigenen Landeplätze und Referenzpunkte.</p>
+                </div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshPlaces()">
+                  Aktualisieren
+                </button>
+              </div>
+              <div id="placesList" class="mt-6 space-y-3"></div>
+              <p id="placesEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Orte vorhanden.</p>
+              <div class="mt-8 grid gap-4 lg:grid-cols-2">
+                <form id="placeForm" onsubmit="submitPlace(event)" class="rounded-3xl border border-slate-100/70 bg-white/80 px-6 py-6 shadow-inner shadow-white/60">
+                  <h4 id="placeFormTitle" class="text-lg font-semibold text-slate-900">Neuen Ort hinzufügen</h4>
+                  <div class="mt-4 space-y-4">
+                    <div>
+                      <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeName">Name</label>
+                      <input id="placeName" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                    </div>
+                    <div>
+                      <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeType">Typ</label>
+                      <input id="placeType" type="text" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                    </div>
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeLat">Lat</label>
+                        <input id="placeLat" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                      </div>
+                      <div>
+                        <label class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400" for="placeLon">Lon</label>
+                        <input id="placeLon" type="number" step="any" class="mt-2 w-full rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" required />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-6 flex flex-wrap items-center gap-3">
+                    <button id="placeSubmit" type="submit" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Hinzufügen</button>
+                    <button id="placeCancel" type="button" class="hidden rounded-2xl border border-brand-red/30 bg-white/70 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-brand-red transition duration-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40" onclick="cancelPlaceEdit()">Abbrechen</button>
+                  </div>
+                  <p id="placeFormMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+                </form>
+                <div class="rounded-3xl border border-slate-100/70 bg-brand-frost/70 px-6 py-6 shadow-inner shadow-white/60">
+                  <h4 class="text-lg font-semibold text-slate-900">Ort suchen</h4>
+                  <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <input id="placeSearch" type="text" placeholder="Ort suchen" class="flex-1 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-base text-slate-900 transition focus:border-brand-purple focus:outline-none focus:ring-2 focus:ring-brand-purple/40" onkeydown="handlePlaceSearchKey(event)" />
+                    <button type="button" class="inline-flex items-center justify-center rounded-2xl bg-brand-purple px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-purple/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-purple/90 hover:shadow-brand-purple/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/70" onclick="searchPlaceInOSM()">Suche</button>
+                  </div>
+                  <p id="placeSearchStatus" class="mt-3 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+                  <div id="placeSearchResults" class="mt-4 flex flex-col gap-3"></div>
+                </div>
+              </div>
+            </section>
+          </section>
+          <section data-settings-section="events" class="${activeSettingsSection === "events" ? "" : "hidden"}">
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Events</span>
+                  <h3 class="text-xl font-semibold text-slate-900">Events verwalten</h3>
+                  <p class="text-sm text-slate-500">Lösche erkannte Takeoff- und Landing-Events.</p>
+                </div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="refreshEventsForSettings()">
+                  Aktualisieren
+                </button>
+              </div>
+              <div id="eventsList" class="mt-6 space-y-3"></div>
+              <p id="eventsEmpty" class="mt-4 hidden text-sm text-slate-500">Keine Events vorhanden.</p>
+              <p id="eventsMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
+            </section>
+          </section>
+        </div>
+      `;
 
       container.innerHTML = html;
 
       const altitudeInput = document.getElementById("cfgAltitude");
       const speedInput = document.getElementById("cfgSpeed");
       const timeoutInput = document.getElementById("cfgTimeout");
+      const radiusInput = document.getElementById("cfgRadius");
       if (altitudeInput) altitudeInput.value = safeConfig.altitudeThresholdFt || "";
       if (speedInput) speedInput.value = safeConfig.speedThresholdKt || "";
       if (timeoutInput) timeoutInput.value = safeConfig.offlineTimeoutSec || "";
+      if (radiusInput) radiusInput.value = safeConfig.placeMatchRadiusMeters || "";
 
       const hexInput = document.getElementById("hexInput");
       if (hexInput) {
         hexInput.addEventListener("input", handleHexInputChange);
       }
 
-      renderPlacesTable(places);
+      renderPlacesTable(currentPlaces);
       updatePlaceFormState();
-      currentAircraft = Array.isArray(aircraftList) ? aircraftList : [];
       renderAircraftList(currentAircraft);
       updateAircraftFormState();
       renderHexHistoryDropdown();
       handleHexInputChange();
-      renderEventsManagementTable(events);
+      renderEventsManagementTable(currentEvents);
+      updateSettingsSectionVisibility();
     }
 
     async function fetchConfig() {
@@ -1679,10 +1857,12 @@
       const altitude = Number(data.altitudeThresholdFt);
       const speed = Number(data.speedThresholdKt);
       const timeout = Number(data.offlineTimeoutSec);
+      const radius = Number(data.placeMatchRadiusMeters);
       return {
         altitudeThresholdFt: Number.isFinite(altitude) ? altitude : 0,
         speedThresholdKt: Number.isFinite(speed) ? speed : 0,
-        offlineTimeoutSec: Number.isFinite(timeout) ? timeout : 0
+        offlineTimeoutSec: Number.isFinite(timeout) ? timeout : 0,
+        placeMatchRadiusMeters: Number.isFinite(radius) ? radius : 0
       };
     }
 
@@ -1710,7 +1890,7 @@
         throw new Error(`Serverantwort ${res.status}`);
       }
       const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      return dedupeAircraftEntries(Array.isArray(data) ? data : []);
     }
 
     function renderPlacesTable(list) {
@@ -1766,13 +1946,15 @@
       const empty = document.getElementById("aircraftEmpty");
       if (!container || !empty) return;
 
-      if (!Array.isArray(list) || list.length === 0) {
+      const sanitizedList = dedupeAircraftEntries(Array.isArray(list) ? list : []);
+
+      if (sanitizedList.length === 0) {
         container.innerHTML = "";
         empty.classList.remove("hidden");
         return;
       }
 
-      const sorted = [...list]
+      const sorted = [...sanitizedList]
         .map(entry => (entry && entry.hex ? { ...entry, hex: normalizeHex(entry.hex) } : null))
         .filter(entry => entry && entry.hex)
         .sort((a, b) => {
@@ -1876,7 +2058,7 @@
     async function refreshAircraftList(showStatus = true) {
       try {
         const list = await fetchAircraftList();
-        currentAircraft = Array.isArray(list) ? list : [];
+        currentAircraft = dedupeAircraftEntries(Array.isArray(list) ? list : []);
         renderAircraftList(currentAircraft);
         if (!editingAircraftHex || !getAircraftEntry(editingAircraftHex)) {
           editingAircraftHex = null;
@@ -1944,6 +2126,7 @@
         currentAircraft = Array.isArray(currentAircraft) ? currentAircraft : [];
         currentAircraft = currentAircraft.filter(entry => normalizeHex(entry && entry.hex) !== updatedHex);
         currentAircraft.push({ ...data, hex: updatedHex, name: updatedName });
+        currentAircraft = dedupeAircraftEntries(currentAircraft);
 
         renderAircraftList(currentAircraft);
         showAircraftMessage(`Name für ${updatedHex.toUpperCase()} gespeichert.`, "success");
@@ -2140,6 +2323,7 @@
       const altitudeInput = document.getElementById("cfgAltitude");
       const speedInput = document.getElementById("cfgSpeed");
       const timeoutInput = document.getElementById("cfgTimeout");
+      const radiusInput = document.getElementById("cfgRadius");
 
       const altitude = parseNumberInput(altitudeInput ? altitudeInput.value : "");
       if (altitude === null || altitude <= 0) {
@@ -2159,6 +2343,12 @@
         return;
       }
 
+      const radius = parseNumberInput(radiusInput ? radiusInput.value : "");
+      if (radius === null || radius <= 0) {
+        showConfigMessage("Bitte einen gültigen Radius größer 0 eingeben.", "error");
+        return;
+      }
+
       showConfigMessage("Speichere...", "");
 
       try {
@@ -2168,7 +2358,8 @@
           body: JSON.stringify({
             altitudeThresholdFt: altitude,
             speedThresholdKt: speed,
-            offlineTimeoutSec: timeout
+            offlineTimeoutSec: timeout,
+            placeMatchRadiusMeters: radius
           })
         });
         const data = await res.json().catch(() => ({}));
@@ -2185,6 +2376,9 @@
         }
         if (timeoutInput && data.offlineTimeoutSec !== undefined) {
           timeoutInput.value = data.offlineTimeoutSec;
+        }
+        if (radiusInput && data.placeMatchRadiusMeters !== undefined) {
+          radiusInput.value = data.placeMatchRadiusMeters;
         }
 
         showConfigMessage("Konfiguration gespeichert.", "success");

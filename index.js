@@ -36,10 +36,13 @@ let pageRecoveryInProgress = false;
 const MAX_CONSECUTIVE_TIMEOUTS_BEFORE_BROWSER_RESTART = 3;
 let consecutiveTimeoutCount = 0;
 
+const DEFAULT_PLACE_MATCH_RADIUS_METERS = 500;
+
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
-  offlineTimeoutSec: 60
+  offlineTimeoutSec: 60,
+  placeMatchRadiusMeters: DEFAULT_PLACE_MATCH_RADIUS_METERS
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -288,6 +291,11 @@ function normalizeConfig(raw) {
     normalized.offlineTimeoutSec = Math.round(timeout);
   }
 
+  const radius = toFiniteNumber(raw.placeMatchRadiusMeters);
+  if (radius !== null && radius > 0) {
+    normalized.placeMatchRadiusMeters = radius;
+  }
+
   return normalized;
 }
 
@@ -297,6 +305,14 @@ function getConfig() {
 
 function getOperationalConfig() {
   return normalizeConfig(config);
+}
+
+function getPlaceMatchRadiusMeters() {
+  const radius = toFiniteNumber(config?.placeMatchRadiusMeters);
+  if (radius !== null && radius > 0) {
+    return radius;
+  }
+  return DEFAULT_CONFIG.placeMatchRadiusMeters;
 }
 
 async function loadConfigFromDisk() {
@@ -441,7 +457,7 @@ function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName
     const lon = toFiniteNumber(eventPlace.lon);
     if (refLat !== null && refLon !== null && lat !== null && lon !== null) {
       const distance = haversine(lat, lon, refLat, refLon);
-      if (Number.isFinite(distance) && distance <= PLACE_MATCH_RADIUS_METERS) {
+      if (Number.isFinite(distance) && distance <= getPlaceMatchRadiusMeters()) {
         return true;
       }
     }
@@ -555,10 +571,16 @@ function parseConfigPayload(payload) {
     throw new Error("Feld 'offlineTimeoutSec' muss mindestens 5 Sekunden betragen.");
   }
 
+  const radius = toFiniteNumber(payload.placeMatchRadiusMeters);
+  if (radius === null || radius <= 0) {
+    throw new Error("Feld 'placeMatchRadiusMeters' muss größer als 0 sein.");
+  }
+
   return {
     altitudeThresholdFt: altitude,
     speedThresholdKt: speed,
-    offlineTimeoutSec: Math.round(timeout)
+    offlineTimeoutSec: Math.round(timeout),
+    placeMatchRadiusMeters: radius
   };
 }
 
@@ -1039,8 +1061,6 @@ function haversine(lat1, lon1, lat2, lon2) {
   return EARTH_RADIUS * c;
 }
 
-const PLACE_MATCH_RADIUS_METERS = 500;
-
 function determinePlaceForRecord(record) {
   if (!record || typeof record !== "object") {
     return { type: "external" };
@@ -1084,7 +1104,9 @@ function determinePlaceForRecord(record) {
     }
   }
 
-  if (nearest && nearestDistance <= PLACE_MATCH_RADIUS_METERS) {
+  const radiusMeters = getPlaceMatchRadiusMeters();
+
+  if (nearest && nearestDistance <= radiusMeters) {
     const { place, lat: placeLat, lon: placeLon } = nearest;
     const name =
       typeof place.name === "string" && place.name.trim()
