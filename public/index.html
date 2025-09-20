@@ -3,11 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <title>Heli Tracker</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#6F5DF7" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Heli Tracker" />
+  <meta name="application-name" content="Heli Tracker" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -114,6 +119,14 @@
 
     <nav class="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-4">
       <div class="pointer-events-auto mx-auto flex max-w-3xl items-center justify-around gap-3 rounded-3xl border border-white/60 bg-white/70 px-3 py-2 shadow-glass backdrop-blur-xl">
+        <button type="button" data-view="dashboard" onclick="showDashboard()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
+          <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75h7.5v7.5h-7.5zM12.75 3.75h7.5v7.5h-7.5zM3.75 12.75h7.5v7.5h-7.5zM12.75 12.75h7.5v7.5h-7.5z" />
+            </svg>
+          </span>
+          <span>Dashboard</span>
+        </button>
         <button type="button" data-view="map" onclick="showADSB()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
           <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
@@ -129,14 +142,6 @@
             </svg>
           </span>
           <span>Events</span>
-        </button>
-        <button type="button" data-view="logs" onclick="showLogs()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
-          <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.25h13.5m-13.5 4.5h13.5m-13.5 4.5h9" />
-            </svg>
-          </span>
-          <span>Logs</span>
         </button>
         <button type="button" data-view="settings" onclick="showSettings()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
           <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
@@ -223,10 +228,16 @@
     };
     const NOTIFICATION_EVENT_TYPES = new Set(["takeoff", "landing"]);
     let notificationPreferences = { ...DEFAULT_NOTIFICATION_SETTINGS };
+    const NOTIFICATION_DEBUG_STORAGE_KEY = "heli-tracker-debug-notifications";
+    let notificationPreferencesReady = false;
+    let notificationPreferencesReadyPromise = null;
+    let notificationDebugMode = loadNotificationDebugMode();
     let serviceWorkerReadyPromise = null;
     let eventStreamSource = null;
     let eventStreamReconnectTimer = null;
     let lastReceivedEventId = null;
+    let activeEventDetail = null;
+    let debugNotificationTimer = null;
     const navInactiveButtonClasses = ["text-slate-500", "bg-transparent", "shadow-none", "scale-100"];
     const navActiveButtonClasses = [
       "text-brand-purple",
@@ -243,7 +254,7 @@
       "text-brand-purple",
       "shadow-[0_10px_24px_rgba(111,93,247,0.35)]"
     ];
-    const settingsSectionOrder = ["aircraft", "thresholds", "notifications", "places", "events"];
+    const settingsSectionOrder = ["aircraft", "thresholds", "notifications", "places", "events", "logs"];
     const settingsTabActiveClasses = [
       "border-brand-purple/40",
       "bg-white",
@@ -256,9 +267,9 @@
       "text-slate-500"
     ];
     const viewTitleMap = {
+      dashboard: "Dashboard",
       map: "Live Map",
       events: "Events",
-      logs: "Logs",
       settings: "Settings"
     };
 
@@ -336,6 +347,7 @@
         notifyOnTakeoff: takeoff,
         notifyOnLanding: landing
       };
+      notificationPreferencesReady = true;
     }
 
     async function ensureServiceWorkerReady() {
@@ -390,6 +402,50 @@
       }
     }
 
+    async function ensureNotificationPreferencesReady() {
+      if (notificationPreferencesReady) {
+        return;
+      }
+
+      if (!notificationPreferencesReadyPromise) {
+        notificationPreferencesReadyPromise = preloadConfigForNotifications();
+      }
+
+      try {
+        await notificationPreferencesReadyPromise;
+      } catch (err) {
+        console.warn("[Notifications] Voreinstellungen konnten nicht geladen werden:", err);
+      }
+    }
+
+    function loadNotificationDebugMode() {
+      try {
+        if (typeof window === "undefined" || !window.localStorage) {
+          return false;
+        }
+        const value = window.localStorage.getItem(NOTIFICATION_DEBUG_STORAGE_KEY);
+        return value === "1";
+      } catch (err) {
+        console.warn("[Notifications] Debug-Modus konnte nicht geladen werden:", err);
+        return false;
+      }
+    }
+
+    function saveNotificationDebugMode(enabled) {
+      try {
+        if (typeof window === "undefined" || !window.localStorage) {
+          return;
+        }
+        if (enabled) {
+          window.localStorage.setItem(NOTIFICATION_DEBUG_STORAGE_KEY, "1");
+        } else {
+          window.localStorage.removeItem(NOTIFICATION_DEBUG_STORAGE_KEY);
+        }
+      } catch (err) {
+        console.warn("[Notifications] Debug-Modus konnte nicht gespeichert werden:", err);
+      }
+    }
+
     function preloadConfigForNotifications() {
       return fetchConfig()
         .then(config => {
@@ -400,6 +456,7 @@
         .catch(err => {
           console.warn("[Notifications] Konfiguration konnte nicht geladen werden:", err);
           notificationPreferences = { ...DEFAULT_NOTIFICATION_SETTINGS };
+          notificationPreferencesReady = true;
           return null;
         });
     }
@@ -519,6 +576,10 @@
     }
 
     function setActiveView(view) {
+      if (view !== "events") {
+        cancelDebugNotificationTimer();
+        activeEventDetail = null;
+      }
       activeView = view;
       const buttons = document.querySelectorAll('.nav-item[data-view]');
       const viewTitle = document.getElementById("viewTitle");
@@ -585,7 +646,7 @@
 
     async function initializeTracker() {
       void ensureServiceWorkerReady();
-      void preloadConfigForNotifications();
+      notificationPreferencesReadyPromise = preloadConfigForNotifications();
       startEventStream();
 
       const container = document.getElementById("content");
@@ -777,6 +838,7 @@
     }
 
     async function showNotificationForEvent(event) {
+      await ensureNotificationPreferencesReady();
       if (!shouldNotifyForEvent(event)) {
         return;
       }
@@ -797,6 +859,19 @@
       }
     }
 
+    function cloneEventForNotification(rawEvent) {
+      if (!rawEvent || typeof rawEvent !== "object") {
+        return null;
+      }
+
+      const clone = { ...rawEvent };
+      if (clone.place && typeof clone.place === "object") {
+        clone.place = { ...clone.place };
+      }
+
+      return clone;
+    }
+
     function processIncomingEvent(rawEvent) {
       if (!rawEvent || typeof rawEvent !== "object") {
         return;
@@ -807,9 +882,9 @@
         return;
       }
 
-      const event = { ...rawEvent };
-      if (event.place && typeof event.place === "object") {
-        event.place = { ...event.place };
+      const event = cloneEventForNotification(rawEvent);
+      if (!event) {
+        return;
       }
 
       currentEvents = Array.isArray(currentEvents) ? [...currentEvents] : [];
@@ -929,15 +1004,92 @@
       }
     }
 
+    function updateEventDebugStatus(message, type = "info") {
+      const el = document.getElementById("eventDebugStatus");
+      if (!el) {
+        return;
+      }
+
+      let color = "text-amber-700";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-600";
+      }
+
+      el.className = `mt-1 text-xs font-semibold ${color}`;
+      el.textContent = message || "";
+    }
+
+    function cancelDebugNotificationTimer() {
+      if (debugNotificationTimer) {
+        clearTimeout(debugNotificationTimer);
+        debugNotificationTimer = null;
+      }
+    }
+
+    async function scheduleDebugNotificationForEvent(event) {
+      if (!notificationDebugMode) {
+        updateEventDebugStatus("Debug-Modus ist deaktiviert.", "error");
+        return;
+      }
+
+      if (!isNotificationSupported()) {
+        updateEventDebugStatus("Benachrichtigungen werden nicht unterstützt.", "error");
+        return;
+      }
+
+      const payload = cloneEventForNotification(event);
+      if (!payload) {
+        updateEventDebugStatus("Keine Eventdaten verfügbar.", "error");
+        return;
+      }
+
+      await ensureNotificationPreferencesReady();
+      if (!shouldNotifyForEvent(payload)) {
+        updateEventDebugStatus("Benachrichtigungen für dieses Event sind deaktiviert.", "error");
+        return;
+      }
+
+      cancelDebugNotificationTimer();
+      updateEventDebugStatus("Debug-Benachrichtigung wird in 5 Sekunden gesendet...", "info");
+
+      debugNotificationTimer = setTimeout(async () => {
+        try {
+          await showNotificationForEvent(payload);
+          updateEventDebugStatus("Debug-Benachrichtigung wurde gesendet.", "success");
+        } catch (err) {
+          console.warn("[Notifications] Debug-Benachrichtigung fehlgeschlagen:", err);
+          updateEventDebugStatus("Debug-Benachrichtigung konnte nicht gesendet werden.", "error");
+        } finally {
+          debugNotificationTimer = null;
+        }
+      }, 5000);
+    }
+
     function renderEventDetail(event) {
       stopSettingsInterval();
       setActiveView("events");
       closeSidebar();
 
+      cancelDebugNotificationTimer();
       cleanupEventMap();
 
       const target = document.getElementById("content");
       if (!target) return;
+
+      const normalizedEvent = cloneEventForNotification(event);
+      if (!normalizedEvent) {
+        target.innerHTML = `
+          <section class="view-panel space-y-6">
+            ${createEmptyCard("Event konnte nicht geladen werden.")}
+          </section>`;
+        activeEventDetail = null;
+        return;
+      }
+
+      event = normalizedEvent;
+      activeEventDetail = normalizedEvent;
 
       const latRaw = event && Object.prototype.hasOwnProperty.call(event, "lat") ? event.lat : null;
       const lonRaw = event && Object.prototype.hasOwnProperty.call(event, "lon") ? event.lon : null;
@@ -955,6 +1107,7 @@
         : null;
 
       const typeRaw = typeof event?.type === "string" ? event.type : "";
+      const typeNormalized = typeRaw.toLowerCase();
       const typeLabel = typeRaw ? typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1) : "Event";
       const callsign = event?.callsign || event?.hex || "—";
       const hexLabel = event?.hex ? String(event.hex).toUpperCase() : String(callsign || "—").toUpperCase();
@@ -962,6 +1115,8 @@
       const locationLabel = getEventLocationLabel(event);
       const altitudeLabel = formatMetricValue(event?.alt, "ft");
       const speedLabel = formatMetricValue(event?.gs, "kt");
+
+      const showDebugButton = notificationDebugMode && NOTIFICATION_EVENT_TYPES.has(typeNormalized);
 
       const mapAction = mapsLink
         ? `<a
@@ -977,6 +1132,20 @@
               In Google Maps öffnen
             </a>`
         : `<span class="inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-500">Keine Koordinaten verfügbar</span>`;
+
+      const debugSection = showDebugButton
+        ? `<div class="rounded-3xl border border-amber-200/60 bg-amber-50/60 px-5 py-5 shadow-inner shadow-amber-100/60">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 class="text-base font-semibold text-amber-800">Debug-Benachrichtigung</h4>
+                <p id="eventDebugStatus" class="mt-1 text-xs font-semibold text-amber-700">Sende eine Benachrichtigung 5 Sekunden nach Klick.</p>
+              </div>
+              <button id="eventDebugTrigger" type="button" class="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-amber-500/40 transition duration-300 hover:scale-[1.02] hover:bg-amber-500/90 hover:shadow-amber-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70">
+                Verzögert testen
+              </button>
+            </div>
+          </div>`
+        : "";
 
       target.innerHTML = `
         <section class="view-panel space-y-6">
@@ -1018,9 +1187,19 @@
             ${createInfoCard("Speed", speedLabel)}
             ${createInfoCard("Altitude", altitudeLabel)}
           </div>
+          ${debugSection}
         </section>`;
 
       target.scrollTop = 0;
+
+      if (showDebugButton) {
+        const debugButton = document.getElementById("eventDebugTrigger");
+        if (debugButton) {
+          debugButton.addEventListener("click", () => {
+            void scheduleDebugNotificationForEvent(event);
+          });
+        }
+      }
 
       if (!hasCoords) {
         return;
@@ -1097,6 +1276,26 @@
       }
     }
 
+    function showDashboard() {
+      stopSettingsInterval();
+      setActiveView("dashboard");
+      closeSidebar();
+      cleanupEventMap();
+      cancelDebugNotificationTimer();
+
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      container.innerHTML = `
+        <section class="view-panel mx-auto w-full max-w-5xl space-y-6 pb-8">
+          <div class="rounded-3xl bg-white/95 px-6 py-8 text-center shadow-card ring-1 ring-white/50 backdrop-blur">
+            <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Dashboard</p>
+            <h2 class="mt-3 text-3xl font-semibold text-brand-ink">In Kürze verfügbar</h2>
+            <p class="mt-2 text-sm text-slate-500">Hier entsteht das zentrale Einsatz-Dashboard.</p>
+          </div>
+        </section>`;
+    }
+
     function showADSB() {
       stopSettingsInterval();
       renderMap(currentHex);
@@ -1113,6 +1312,8 @@
       setActiveView("events");
       closeSidebar();
       cleanupEventMap();
+      cancelDebugNotificationTimer();
+      activeEventDetail = null;
       eventDetailReturnState = { mode: "overview", groupKey: null };
 
       const container = document.getElementById("content");
@@ -1383,6 +1584,8 @@
     }
 
     function handleEventDetailBack() {
+      cancelDebugNotificationTimer();
+      activeEventDetail = null;
       const targetKey = eventDetailReturnState && eventDetailReturnState.mode === "group"
         ? eventDetailReturnState.groupKey
         : null;
@@ -1554,21 +1757,24 @@
       return label || getFallbackLocationLabel(event.type);
     }
 
-    async function showLogs() {
-      stopSettingsInterval();
-      setActiveView("logs");
-      closeSidebar();
-      cleanupEventMap();
-      activeLogHex = null;
+    function getSettingsLogsContainer() {
+      return document.getElementById("settingsLogsContainer");
+    }
 
-      await loadLogOverview();
+    function renderLogsMessage(message) {
+      const container = getSettingsLogsContainer();
+      if (!container) return;
+      container.innerHTML = `<div class="rounded-3xl border border-slate-100/70 bg-white/90 px-6 py-5 text-sm font-medium text-slate-600 shadow-card">${escapeHtml(message)}</div>`;
     }
 
     async function loadLogOverview() {
-      const container = document.getElementById("content");
-      if (!container) return;
+      activeLogHex = null;
+      const container = getSettingsLogsContainer();
+      if (!container) {
+        return;
+      }
 
-      container.innerHTML = createStatusCard("Lade Logs...");
+      renderLogsMessage("Lade Logs...");
 
       try {
         const response = await fetch("/log");
@@ -1584,21 +1790,21 @@
         console.error("[Logs] Übersicht konnte nicht geladen werden:", err);
         const message = err && err.message ? err.message : String(err);
         container.innerHTML = `
-          <section class="view-panel mx-auto w-full max-w-4xl space-y-6 p-4">
+          <div class="space-y-4">
             ${createEmptyCard(`Fehler beim Laden der Logs (${escapeHtml(message)})`)}
-          </section>`;
+            <div class="flex justify-center">
+              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onclick="loadLogOverview()">Erneut versuchen</button>
+            </div>
+          </div>`;
       }
     }
 
     function renderLogOverview(list) {
-      const container = document.getElementById("content");
+      const container = getSettingsLogsContainer();
       if (!container) return;
 
       if (!Array.isArray(list) || list.length === 0) {
-        container.innerHTML = `
-          <section class="view-panel mx-auto w-full max-w-4xl space-y-6 p-4">
-            ${createEmptyCard("Keine Logs vorhanden")}
-          </section>`;
+        container.innerHTML = createEmptyCard("Keine Logs vorhanden");
         return;
       }
 
@@ -1643,22 +1849,7 @@
           </article>`;
       }).join("");
 
-      container.innerHTML = `
-        <section class="view-panel mx-auto w-full max-w-5xl space-y-6 pb-8">
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Logs</p>
-              <h2 class="text-3xl font-semibold text-brand-ink">Flugdatensätze</h2>
-              <p class="text-sm text-slate-500">Wähle ein Flugzeug, um die vollständigen Rohdaten einzusehen.</p>
-            </div>
-            <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onclick="loadLogOverview()">
-              Aktualisieren
-            </button>
-          </div>
-          <div class="flex flex-col gap-4">
-            ${cards}
-          </div>
-        </section>`;
+      container.innerHTML = cards;
     }
 
     async function openLogDetail(hex) {
@@ -1668,10 +1859,10 @@
       }
 
       activeLogHex = targetHex;
-      const container = document.getElementById("content");
+      const container = getSettingsLogsContainer();
       if (!container) return;
 
-      container.innerHTML = createStatusCard("Lade Log...");
+      renderLogsMessage("Lade Log...");
 
       try {
         const response = await fetch(`/log?hex=${encodeURIComponent(targetHex)}`);
@@ -1686,31 +1877,29 @@
         renderLogDetail(targetHex, Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("[Logs] Detailansicht konnte nicht geladen werden:", err);
-        const container = document.getElementById("content");
-        if (!container) return;
         const message = err && err.message ? err.message : String(err);
+        const retryHex = escapeHtml(targetHex);
         container.innerHTML = `
-          <section class="view-panel mx-auto w-full max-w-4xl space-y-6 p-4">
+          <div class="space-y-4">
             ${createEmptyCard(`Fehler beim Laden des Logs (${escapeHtml(message)})`)}
-            <div class="flex justify-center">
-              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onclick="returnToLogOverview()">Zurück</button>
+            <div class="flex flex-wrap justify-center gap-3">
+              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300" onclick="returnToLogOverview()">Zurück</button>
+              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-5 py-3 text-sm font-semibold text-white shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50" onclick="openLogDetail('${retryHex}')">Erneut versuchen</button>
             </div>
-          </section>`;
+          </div>`;
       }
     }
 
     function renderLogDetail(hex, data) {
-      const container = document.getElementById("content");
+      const container = getSettingsLogsContainer();
       if (!container) return;
 
       if (!Array.isArray(data) || data.length === 0) {
         container.innerHTML = `
-          <section class="view-panel mx-auto w-full max-w-4xl space-y-6 p-4">
-            ${createEmptyCard("Keine Log-Einträge vorhanden")}
-            <div class="flex justify-center">
-              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onclick="returnToLogOverview()">Zurück</button>
-            </div>
-          </section>`;
+          ${createEmptyCard("Keine Log-Einträge vorhanden")}
+          <div class="flex justify-center">
+            <button type="button" class="mt-2 inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300" onclick="returnToLogOverview()">Zurück</button>
+          </div>`;
         return;
       }
 
@@ -1748,9 +1937,10 @@
       const overviewEntry = cachedLogOverview.find(item => item && String(item.hex).toLowerCase() === hex);
       const callsign = overviewEntry && overviewEntry.last ? overviewEntry.last.callsign : (data[data.length - 1]?.callsign ?? "—");
       const headingHex = hex ? hex.toUpperCase() : "—";
+      const latestLabel = escapeHtml(formatDateTime(limited[0]?.time));
 
       container.innerHTML = `
-        <section class="view-panel mx-auto w-full max-w-6xl space-y-6 pb-8">
+        <div class="space-y-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-3">
               <button type="button" onclick="returnToLogOverview()" class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-brand-purple/20 bg-white text-brand-purple shadow-sm transition-transform duration-300 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/60" aria-label="Zurück zur Übersicht">
@@ -1764,7 +1954,7 @@
                 <p class="text-sm text-slate-500">HEX ${escapeHtml(headingHex)}</p>
               </div>
             </div>
-            <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">${escapeHtml(formatDateTime(limited[0]?.time))}</span>
+            <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">${latestLabel}</span>
           </div>
           <div class="rounded-2xl border border-brand-purple/10 bg-white shadow-card">
             <div class="max-h-[70vh] overflow-auto">
@@ -1784,7 +1974,7 @@
               </table>
             </div>
           </div>
-        </section>`;
+        </div>`;
     }
 
     function returnToLogOverview() {
@@ -2000,7 +2190,8 @@
         { id: "thresholds", label: "Schwellwerte", description: "Grenzwerte für Events festlegen" },
         { id: "notifications", label: "Benachrichtigungen", description: "Push-Benachrichtigungen konfigurieren" },
         { id: "places", label: "Orte verwalten", description: "Eigene Landeplätze pflegen" },
-        { id: "events", label: "Events verwalten", description: "Takeoffs & Landings administrieren" }
+        { id: "events", label: "Events verwalten", description: "Takeoffs & Landings administrieren" },
+        { id: "logs", label: "Logs & Rohdaten", description: "Letzte Flugdaten einsehen" }
       ];
 
       const navHtml = `
@@ -2166,6 +2357,19 @@
                 <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
                   <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
+                      <h4 class="text-base font-semibold text-slate-900">Debug Modus</h4>
+                      <p class="text-xs text-slate-500">Blendt einen Test-Button in Eventdetails ein und löst Benachrichtigungen verzögert aus.</p>
+                    </div>
+                    <label class="relative inline-flex cursor-pointer items-center">
+                      <input id="notificationsDebug" type="checkbox" class="peer sr-only" />
+                      <span class="h-11 w-20 rounded-full bg-slate-200 transition-all duration-300 peer-checked:bg-amber-400/80"></span>
+                      <span class="absolute left-1 top-1 h-9 w-9 rounded-full bg-white shadow-md transition-all duration-300 peer-checked:translate-x-9"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
                       <h4 class="text-base font-semibold text-slate-900">Testen</h4>
                       <p class="text-xs text-slate-500">Sende eine Probe-Benachrichtigung an dein Gerät.</p>
                     </div>
@@ -2253,6 +2457,21 @@
               <p id="eventsMessage" class="mt-4 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
             </section>
           </section>
+          <section data-settings-section="logs" class="${activeSettingsSection === "logs" ? "" : "hidden"}">
+            <section class="settings-section rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/50 backdrop-blur">
+              <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <span class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Logs</span>
+                  <h3 class="text-xl font-semibold text-slate-900">Flugdatensätze</h3>
+                  <p class="text-sm text-slate-500">Analysiere die letzten Rohdaten deiner Flüge.</p>
+                </div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-700 shadow-inner shadow-white/40 transition duration-300 hover:bg-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" onclick="loadLogOverview()">
+                  Aktualisieren
+                </button>
+              </div>
+              <div id="settingsLogsContainer" class="mt-6 space-y-4"></div>
+            </section>
+          </section>
         </div>
       `;
 
@@ -2282,6 +2501,7 @@
       renderHexHistoryDropdown();
       handleHexInputChange();
       renderEventsManagementTable(currentEvents);
+      loadLogOverview();
       updateSettingsSectionVisibility();
     }
 
@@ -2290,6 +2510,7 @@
       const takeoffInput = document.getElementById("notificationsTakeoff");
       const landingInput = document.getElementById("notificationsLanding");
       const testButton = document.getElementById("notificationsTestButton");
+      const debugInput = document.getElementById("notificationsDebug");
 
       if (enabledInput) {
         enabledInput.addEventListener("change", handleNotificationsEnabledChange);
@@ -2302,6 +2523,9 @@
       }
       if (testButton) {
         testButton.addEventListener("click", triggerNotificationTest);
+      }
+      if (debugInput) {
+        debugInput.addEventListener("change", handleNotificationDebugToggle);
       }
     }
 
@@ -2334,6 +2558,7 @@
       const enabledInput = document.getElementById("notificationsEnabled");
       const takeoffInput = document.getElementById("notificationsTakeoff");
       const landingInput = document.getElementById("notificationsLanding");
+      const debugInput = document.getElementById("notificationsDebug");
 
       const supported = isNotificationSupported();
       const permissionDenied = supported && typeof Notification !== "undefined" && Notification.permission === "denied";
@@ -2352,6 +2577,10 @@
       if (landingInput) {
         landingInput.checked = !!(notificationPreferences && notificationPreferences.notifyOnLanding);
         landingInput.disabled = !supported || !enabled;
+      }
+
+      if (debugInput) {
+        debugInput.checked = !!notificationDebugMode;
       }
 
       updateNotificationSupportHint();
@@ -2445,6 +2674,15 @@
       notificationPreferences.notifyOnLanding = !!(event && event.target && event.target.checked);
       updateNotificationControlsFromState();
       await persistNotificationPreferences();
+    }
+
+    function handleNotificationDebugToggle(event) {
+      notificationDebugMode = !!(event && event.target && event.target.checked);
+      saveNotificationDebugMode(notificationDebugMode);
+
+      if (activeView === "events" && activeEventDetail) {
+        renderEventDetail(activeEventDetail);
+      }
     }
 
     async function triggerNotificationTest() {
