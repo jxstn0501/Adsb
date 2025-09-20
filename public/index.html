@@ -198,6 +198,12 @@
     let nominatimSearchToken = 0;
     let activeView = "map";
     let activeEventMap = null;
+    let eventStream = null;
+    let eventStreamReconnectTimer = null;
+    const deliveredNotificationIds = new Set();
+    let notificationDebugEnabled = false;
+    const EVENT_STREAM_RECONNECT_DELAY_MS = 5000;
+    const DEBUG_NOTIFICATION_DELAY_MS = 5000;
     let cachedLogOverview = [];
     let activeLogHex = null;
     const navInactiveButtonClasses = ["text-slate-500", "bg-transparent", "shadow-none", "scale-100"];
@@ -224,6 +230,28 @@
     };
 
     window.addEventListener("DOMContentLoaded", initializeTracker);
+
+    function setNotificationDebugEnabled(value) {
+      notificationDebugEnabled = Boolean(value);
+      updateDebugButtonVisibility();
+    }
+
+    function isNotificationDebugEnabled() {
+      return Boolean(notificationDebugEnabled);
+    }
+
+    function updateDebugButtonVisibility() {
+      const enabled = isNotificationDebugEnabled();
+      document.querySelectorAll('[data-debug-notification-button]').forEach(button => {
+        if (enabled) {
+          button.classList.remove("hidden");
+          button.setAttribute("aria-hidden", "false");
+        } else {
+          button.classList.add("hidden");
+          button.setAttribute("aria-hidden", "true");
+        }
+      });
+    }
 
     function formatDateTime(value) {
       if (!value && value !== 0) {
@@ -302,7 +330,27 @@
         container.innerHTML = createStatusCard("Lade Daten...");
       }
 
-      const detectedHex = (await fetchLatestHex()) || (await fetchFirstHexFromLogs());
+      let detectedHex = null;
+      try {
+        const [configData, hexCandidate] = await Promise.all([
+          fetchConfig().catch(err => {
+            console.warn("[Init] /config konnte nicht geladen werden:", err);
+            return null;
+          }),
+          (async () => (await fetchLatestHex()) || (await fetchFirstHexFromLogs()))()
+        ]);
+
+        if (configData) {
+          currentConfigCache = configData;
+          setNotificationDebugEnabled(Boolean(configData.debugNotifications));
+        } else {
+          setNotificationDebugEnabled(false);
+        }
+
+        detectedHex = hexCandidate;
+      } finally {
+        startEventStream();
+      }
 
       if (detectedHex) {
         renderMap(detectedHex);
@@ -341,6 +389,261 @@
         console.warn("[Init] /log Übersicht konnte nicht geladen werden:", err);
       }
       return null;
+    }
+
+    function closeEventStream() {
+      if (eventStream) {
+        eventStream.close();
+        eventStream = null;
+      }
+      if (eventStreamReconnectTimer) {
+        clearTimeout(eventStreamReconnectTimer);
+        eventStreamReconnectTimer = null;
+      }
+    }
+
+    function scheduleEventStreamReconnect() {
+      if (eventStreamReconnectTimer) {
+        return;
+      }
+      eventStreamReconnectTimer = setTimeout(() => {
+        eventStreamReconnectTimer = null;
+        startEventStream();
+      }, EVENT_STREAM_RECONNECT_DELAY_MS);
+    }
+
+    function markEventsAsDelivered(list) {
+      if (!Array.isArray(list)) {
+        return;
+      }
+      list.forEach(entry => {
+        if (!entry || entry.id === undefined || entry.id === null) {
+          return;
+        }
+        deliveredNotificationIds.add(String(entry.id));
+      });
+    }
+
+    function upsertEventInCache(entry) {
+      if (!Array.isArray(currentEvents)) {
+        currentEvents = [];
+      }
+
+      if (!entry) {
+        return;
+      }
+
+      const hasId = entry.id !== undefined && entry.id !== null;
+      if (!hasId) {
+        currentEvents.push(entry);
+        return;
+      }
+
+      const id = String(entry.id);
+      const index = currentEvents.findIndex(item => item && String(item.id) === id);
+      if (index >= 0) {
+        currentEvents[index] = entry;
+      } else {
+        currentEvents.push(entry);
+      }
+    }
+
+    function handleEventStreamInit(event) {
+      if (!event || typeof event.data !== "string") {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload && Array.isArray(payload.events)) {
+          currentEvents = payload.events.slice();
+          markEventsAsDelivered(currentEvents);
+
+          if (activeView === "events" && !document.querySelector('[data-event-detail-root="true"]')) {
+            renderEventsOverview(currentEvents);
+          }
+
+          const settingsEventsList = document.getElementById("eventsList");
+          if (settingsEventsList) {
+            renderEventsTable(currentEvents);
+          }
+        }
+      } catch (err) {
+        console.error("[Events] Init-Daten konnten nicht verarbeitet werden:", err);
+      }
+
+      updateDebugButtonVisibility();
+    }
+
+    async function handleEventStreamUpdate(eventMessage) {
+      if (!eventMessage || typeof eventMessage.data !== "string") {
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(eventMessage.data);
+      } catch (err) {
+        console.error("[Events] Update konnte nicht verarbeitet werden:", err);
+        return;
+      }
+
+      const entry = payload && payload.event ? payload.event : null;
+      if (!entry) {
+        return;
+      }
+
+      upsertEventInCache(entry);
+
+      const id = entry.id !== undefined && entry.id !== null ? String(entry.id) : null;
+      if (id && !deliveredNotificationIds.has(id)) {
+        deliveredNotificationIds.add(id);
+        await showEventNotification(entry, { isTest: false });
+      }
+
+      if (activeView === "events" && !document.querySelector('[data-event-detail-root="true"]')) {
+        renderEventsOverview(currentEvents);
+      }
+
+      const settingsEventsList = document.getElementById("eventsList");
+      if (settingsEventsList) {
+        renderEventsTable(currentEvents);
+      }
+
+      updateDebugButtonVisibility();
+    }
+
+    function startEventStream() {
+      if (typeof EventSource === "undefined") {
+        console.warn("[Events] EventSource wird vom Browser nicht unterstützt.");
+        return;
+      }
+
+      closeEventStream();
+
+      try {
+        eventStream = new EventSource("/events/stream");
+      } catch (err) {
+        console.error("[Events] Event-Stream konnte nicht geöffnet werden:", err);
+        scheduleEventStreamReconnect();
+        return;
+      }
+
+      eventStream.addEventListener("open", () => {
+        if (eventStreamReconnectTimer) {
+          clearTimeout(eventStreamReconnectTimer);
+          eventStreamReconnectTimer = null;
+        }
+      });
+
+      eventStream.addEventListener("init", handleEventStreamInit);
+      eventStream.addEventListener("update", event => {
+        void handleEventStreamUpdate(event);
+      });
+      eventStream.addEventListener("error", () => {
+        closeEventStream();
+        scheduleEventStreamReconnect();
+      });
+    }
+
+    async function ensureNotificationPermission() {
+      if (typeof window === "undefined" || typeof Notification === "undefined") {
+        return "unsupported";
+      }
+
+      if (Notification.permission === "granted") {
+        return "granted";
+      }
+
+      if (Notification.permission === "denied") {
+        return "denied";
+      }
+
+      try {
+        const result = await Notification.requestPermission();
+        return result;
+      } catch (err) {
+        console.warn("[Notifications] Anfordern der Berechtigung fehlgeschlagen:", err);
+        return Notification.permission;
+      }
+    }
+
+    async function showEventNotification(event, { isTest = false } = {}) {
+      if (!event || typeof event !== "object") {
+        return;
+      }
+
+      if (typeof window === "undefined" || typeof Notification === "undefined") {
+        console.warn("[Notifications] Browser unterstützt keine Desktop-Benachrichtigungen.");
+        return;
+      }
+
+      const permission = await ensureNotificationPermission();
+      if (permission !== "granted") {
+        if (permission === "denied") {
+          console.warn("[Notifications] Berechtigung wurde verweigert. Benachrichtigungen werden nicht angezeigt.");
+        }
+        return;
+      }
+
+      const typeRaw = typeof event.type === "string" ? event.type : "";
+      const typeLabel = typeRaw ? typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1) : "Event";
+      const callsign = event.callsign || event.hex || "Unbekanntes Luftfahrzeug";
+      const placeLabel = formatEventPlace(event.place, event.type);
+      const timeLabel = formatDateTime(event.time);
+      const altitudeLabel = formatMetricValue(event.alt, "ft");
+      const speedLabel = formatMetricValue(event.gs, "kt");
+
+      const lines = [];
+      if (timeLabel && timeLabel !== "—") {
+        lines.push(timeLabel);
+      }
+      if (placeLabel) {
+        lines.push(`Ort: ${placeLabel}`);
+      }
+      if (altitudeLabel && altitudeLabel !== "—") {
+        lines.push(`Höhe: ${altitudeLabel}`);
+      }
+      if (speedLabel && speedLabel !== "—") {
+        lines.push(`Speed: ${speedLabel}`);
+      }
+
+      const titlePrefix = isTest ? "Debug " : "";
+      const notification = new Notification(`${titlePrefix}${typeLabel} • ${callsign}`, {
+        body: lines.join("\n"),
+        tag: event.id !== undefined && event.id !== null
+          ? `heli-event-${event.id}${isTest ? "-test" : ""}`
+          : undefined,
+        renotify: isTest,
+        silent: false
+      });
+
+      notification.onclick = () => {
+        try {
+          window.focus();
+        } catch (err) {
+          console.warn("[Notifications] Fokus konnte nicht gesetzt werden:", err);
+        }
+      };
+    }
+
+    function triggerEventNotificationDebug(encodedEvent) {
+      if (typeof encodedEvent !== "string" || !encodedEvent) {
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(decodeURIComponent(encodedEvent));
+      } catch (err) {
+        console.error("[Debug] Event-Payload konnte nicht geparst werden:", err);
+        return;
+      }
+
+      console.info("[Debug] Test-Benachrichtigung wird in 5 Sekunden ausgelöst.");
+      setTimeout(() => {
+        void showEventNotification(payload, { isTest: true });
+      }, DEBUG_NOTIFICATION_DELAY_MS);
     }
 
     function setCurrentHex(hex) {
@@ -447,6 +750,21 @@
       const locationLabel = getEventLocationLabel(event);
       const altitudeLabel = formatMetricValue(event?.alt, "ft");
       const speedLabel = formatMetricValue(event?.gs, "kt");
+      const detailPayload = {
+        time: event?.time ?? null,
+        type: typeRaw || null,
+        hex: event?.hex ?? null,
+        callsign: event?.callsign ?? null,
+        lat: hasCoords ? Number(latNum.toFixed(6)) : null,
+        lon: hasCoords ? Number(lonNum.toFixed(6)) : null,
+        alt: event?.alt ?? null,
+        gs: event?.gs ?? null,
+        place: event?.place ?? null,
+        id: event?.id ?? null
+      };
+      const encodedDetail = encodeURIComponent(JSON.stringify(detailPayload));
+      const debugDetailClass = isNotificationDebugEnabled() ? "" : "hidden";
+      const debugDetailAriaHidden = isNotificationDebugEnabled() ? "false" : "true";
 
       const mapAction = mapsLink
         ? `<a
@@ -464,7 +782,7 @@
         : `<span class="inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-500">Keine Koordinaten verfügbar</span>`;
 
       target.innerHTML = `
-        <section class="view-panel space-y-6">
+        <section class="view-panel space-y-6" data-event-detail-root="true">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-3">
               <button
@@ -503,9 +821,22 @@
             ${createInfoCard("Speed", speedLabel)}
             ${createInfoCard("Altitude", altitudeLabel)}
           </div>
+          <div class="flex justify-end">
+            <button
+              type="button"
+              data-debug-notification-button
+              class="inline-flex items-center justify-center rounded-2xl border border-dashed border-brand-purple/50 px-5 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple transition hover:border-brand-purple hover:text-brand-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 ${debugDetailClass}"
+              aria-hidden="${debugDetailAriaHidden}"
+              onclick="triggerEventNotificationDebug('${encodedDetail}')"
+            >
+              Debug Notification (5s)
+            </button>
+          </div>
         </section>`;
 
       target.scrollTop = 0;
+
+      updateDebugButtonVisibility();
 
       if (!hasCoords) {
         return;
@@ -611,129 +942,16 @@
         }
 
         const data = await response.json();
-        const events = Array.isArray(data)
+        const filtered = Array.isArray(data)
           ? data.filter(item => {
               const type = typeof item?.type === "string" ? item.type.toLowerCase() : "";
               return type === "takeoff" || type === "landing";
             })
           : [];
 
-        if (events.length === 0) {
-          container.innerHTML = `
-            <section class="view-panel mx-auto w-full max-w-5xl space-y-6">
-              <div class="flex flex-col gap-2">
-                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
-                <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Flugbewegungen</h2>
-                <p class="text-sm text-slate-500">Noch wurden keine Takeoff- oder Landing-Events erkannt.</p>
-              </div>
-              ${createEmptyCard("Noch keine Events erkannt")}
-            </section>`;
-          return;
-        }
-
-        const cards = events.map(event => {
-          const typeRaw = typeof event.type === "string" ? event.type : "";
-          const type = typeRaw.toLowerCase();
-          const isLanding = type === "landing";
-          const typeLabel = typeRaw ? typeRaw.toUpperCase() : "EVENT";
-
-          const callsign = escapeHtml(event.callsign || event.hex || "—");
-          const altitude = escapeHtml(formatMetricValue(event.alt, "ft"));
-          const speed = escapeHtml(formatMetricValue(event.gs, "kt"));
-          const time = escapeHtml(formatDateTime(event.time));
-
-          const latNum = Number(event.lat);
-          const lonNum = Number(event.lon);
-          const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
-          const latFixed = hasCoords ? latNum.toFixed(6) : null;
-          const lonFixed = hasCoords ? lonNum.toFixed(6) : null;
-          const positionLabel = hasCoords
-            ? `${latFixed}°, ${lonFixed}°`
-            : `${event.lat ?? "—"}, ${event.lon ?? "—"}`;
-          const safePositionLabel = escapeHtml(positionLabel);
-
-          const place = formatEventPlace(event.place, type);
-
-          const eventPayload = {
-            time: event.time ?? null,
-            type: typeRaw || null,
-            hex: event.hex ?? null,
-            callsign: event.callsign ?? null,
-            lat: hasCoords ? Number(latNum.toFixed(6)) : null,
-            lon: hasCoords ? Number(lonNum.toFixed(6)) : null,
-            alt: event.alt ?? null,
-            gs: event.gs ?? null,
-            place: event.place ?? null
-          };
-          const encodedEvent = encodeURIComponent(JSON.stringify(eventPayload));
-
-          const iconBackground = isLanding
-            ? "bg-emerald-500 text-white shadow-[0_10px_20px_rgba(16,185,129,0.35)]"
-            : "bg-brand-red text-white shadow-[0_10px_20px_rgba(217,48,48,0.35)]";
-          const iconSvg = isLanding
-            ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21l4-4h-3V5h-2v12H8l4 4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 4.5h14" /></svg>'
-            : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l-4 4h3v10h2V7h3l-4-4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 19.5h14" /></svg>';
-
-          const buttonDisabled = !hasCoords;
-          const buttonAttributes = buttonDisabled
-            ? 'type="button" disabled'
-            : `type="button" onclick="openEventFromEncoded('${encodedEvent}')"`;
-
-          const buttonClasses = buttonDisabled
-            ? "inline-flex items-center justify-between gap-2 rounded-2xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400"
-            : "inline-flex items-center justify-between gap-2 rounded-2xl bg-brand-purple px-4 py-2 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50";
-
-          return `
-            <article class="group flex h-full flex-col gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_25px_45px_rgba(111,93,247,0.2)]">
-              <div class="flex items-start justify-between gap-3">
-                <div class="flex items-start gap-3">
-                  <span class="flex h-11 w-11 items-center justify-center rounded-xl text-white transition-transform duration-300 group-hover:scale-110 ${iconBackground}">
-                    ${iconSvg}
-                  </span>
-                  <div class="space-y-1">
-                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(typeLabel)}</p>
-                    <h3 class="text-xl font-semibold text-brand-ink">${callsign}</h3>
-                    <p class="text-xs text-slate-500">${place}</p>
-                  </div>
-                </div>
-                <span class="rounded-full bg-sky-100 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-sky-600">${time}</span>
-              </div>
-              <div class="grid gap-2 rounded-2xl bg-brand-frost/70 p-3 text-sm text-slate-500">
-                <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Altitude</span>
-                  <span class="font-semibold text-brand-ink">${altitude}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Speed</span>
-                  <span class="font-semibold text-brand-ink">${speed}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Position</span>
-                  <span class="truncate pl-3 text-right font-semibold text-brand-ink">${safePositionLabel}</span>
-                </div>
-              </div>
-              <div class="flex items-center justify-between">
-                <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Mehr Details</p>
-                <button ${buttonAttributes} class="${buttonClasses} ${buttonDisabled ? "cursor-not-allowed" : ""}">
-                  <span>Eventdetails anzeigen</span>
-                  <span aria-hidden="true">→</span>
-                </button>
-              </div>
-            </article>`;
-        }).join("");
-
-        const grid = `<section class="view-panel mx-auto w-full max-w-6xl space-y-6 pb-8">
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
-              <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Bewegungen</h2>
-              <p class="text-sm text-slate-500">Takeoff- und Landing-Events deines gewählten Flugzeugs.</p>
-            </div>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2">${cards}</div>
-        </section>`;
-
-        container.innerHTML = grid;
+        currentEvents = filtered;
+        markEventsAsDelivered(filtered);
+        renderEventsOverview(filtered);
       } catch (err) {
         console.error("[Events] Liste konnte nicht geladen werden:", err);
         const message = err && err.message ? err.message : String(err);
@@ -742,6 +960,137 @@
             ${createEmptyCard(`Fehler beim Laden der Events (${escapeHtml(message)})`)}
           </section>`;
       }
+    }
+
+    function renderEventsOverview(list) {
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      if (!Array.isArray(list) || list.length === 0) {
+        container.innerHTML = `
+          <section class="view-panel mx-auto w-full max-w-5xl space-y-6" data-event-overview-root="true">
+            <div class="flex flex-col gap-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
+              <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Flugbewegungen</h2>
+              <p class="text-sm text-slate-500">Noch wurden keine Takeoff- oder Landing-Events erkannt.</p>
+            </div>
+            ${createEmptyCard("Noch keine Events erkannt")}
+          </section>`;
+        updateDebugButtonVisibility();
+        return;
+      }
+
+      const cards = list.map(event => {
+        if (!event) return "";
+
+        const typeRaw = typeof event.type === "string" ? event.type : "";
+        const type = typeRaw.toLowerCase();
+        const isLanding = type === "landing";
+        const typeLabel = typeRaw ? typeRaw.toUpperCase() : "EVENT";
+
+        const callsign = escapeHtml(event.callsign || event.hex || "—");
+        const altitude = escapeHtml(formatMetricValue(event.alt, "ft"));
+        const speed = escapeHtml(formatMetricValue(event.gs, "kt"));
+        const time = escapeHtml(formatDateTime(event.time));
+
+        const latNum = Number(event.lat);
+        const lonNum = Number(event.lon);
+        const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+        const latFixed = hasCoords ? latNum.toFixed(6) : null;
+        const lonFixed = hasCoords ? lonNum.toFixed(6) : null;
+        const positionLabel = hasCoords
+          ? `${latFixed}°, ${lonFixed}°`
+          : `${event.lat ?? "—"}, ${event.lon ?? "—"}`;
+        const safePositionLabel = escapeHtml(positionLabel);
+
+        const place = formatEventPlace(event.place, type);
+
+        const eventPayload = {
+          time: event.time ?? null,
+          type: typeRaw || null,
+          hex: event.hex ?? null,
+          callsign: event.callsign ?? null,
+          lat: hasCoords ? Number(latNum.toFixed(6)) : null,
+          lon: hasCoords ? Number(lonNum.toFixed(6)) : null,
+          alt: event.alt ?? null,
+          gs: event.gs ?? null,
+          place: event.place ?? null,
+          id: event.id ?? null
+        };
+        const encodedEvent = encodeURIComponent(JSON.stringify(eventPayload));
+
+        const iconBackground = isLanding
+          ? "bg-emerald-500 text-white shadow-[0_10px_20px_rgba(16,185,129,0.35)]"
+          : "bg-brand-red text-white shadow-[0_10px_20px_rgba(217,48,48,0.35)]";
+        const iconSvg = isLanding
+          ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21l4-4h-3V5h-2v12H8l4 4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 4.5h14" /></svg>'
+          : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l-4 4h3v10h2V7h3l-4-4z" /><path stroke-linecap="round" stroke-linejoin="round" d="M5 19.5h14" /></svg>';
+
+        const buttonDisabled = !hasCoords;
+        const buttonAttributes = buttonDisabled
+          ? 'type="button" disabled'
+          : `type="button" onclick="openEventFromEncoded('${encodedEvent}')"`;
+
+        const buttonClasses = buttonDisabled
+          ? "inline-flex items-center justify-between gap-2 rounded-2xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400"
+          : "inline-flex items-center justify-between gap-2 rounded-2xl bg-brand-purple px-4 py-2 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50";
+
+        const debugButton = `<button type="button" data-debug-notification-button class="inline-flex items-center justify-center rounded-2xl border border-dashed border-brand-purple/50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-brand-purple transition hover:border-brand-purple hover:text-brand-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 ${isNotificationDebugEnabled() ? "" : "hidden"}" aria-hidden="${isNotificationDebugEnabled() ? "false" : "true"}" onclick="triggerEventNotificationDebug('${encodedEvent}')">Debug Notification</button>`;
+
+        return `
+          <article class="group flex h-full flex-col gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_25px_45px_rgba(111,93,247,0.2)]">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-start gap-3">
+                <span class="flex h-11 w-11 items-center justify-center rounded-xl text-white transition-transform duration-300 group-hover:scale-110 ${iconBackground}">
+                  ${iconSvg}
+                </span>
+                <div class="space-y-1">
+                  <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(typeLabel)}</p>
+                  <h3 class="text-xl font-semibold text-brand-ink">${callsign}</h3>
+                  <p class="text-xs text-slate-500">${place}</p>
+                </div>
+              </div>
+              <span class="rounded-full bg-sky-100 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-sky-600">${time}</span>
+            </div>
+            <div class="grid gap-2 rounded-2xl bg-brand-frost/70 p-3 text-sm text-slate-500">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Altitude</span>
+                <span class="font-semibold text-brand-ink">${altitude}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Speed</span>
+                <span class="font-semibold text-brand-ink">${speed}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Position</span>
+                <span class="truncate pl-3 text-right font-semibold text-brand-ink">${safePositionLabel}</span>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Mehr Details</p>
+              <div class="flex flex-wrap items-center gap-2 justify-end">
+                <button ${buttonAttributes} class="${buttonClasses} ${buttonDisabled ? "cursor-not-allowed" : ""}">
+                  <span>Eventdetails anzeigen</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+                ${debugButton}
+              </div>
+            </div>
+          </article>`;
+      }).join("");
+
+      container.innerHTML = `<section class="view-panel mx-auto w-full max-w-6xl space-y-6 pb-8" data-event-overview-root="true">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Events</p>
+            <h2 class="text-3xl font-semibold text-brand-ink">Aktuelle Bewegungen</h2>
+            <p class="text-sm text-slate-500">Takeoff- und Landing-Events deines gewählten Flugzeugs.</p>
+          </div>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">${cards}</div>
+      </section>`;
+
+      updateDebugButtonVisibility();
     }
 
     function getFallbackLocationLabel(eventType) {
@@ -1241,6 +1590,18 @@
                 <input id="cfgTimeout" type="number" min="5" step="1" required class="mt-3 w-full bg-transparent text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none" />
               </div>
             </div>
+            <div class="rounded-2xl border border-slate-100/80 bg-white/80 px-4 py-4 shadow-inner shadow-white/50">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <span class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Debug</span>
+                  <p class="mt-2 max-w-md text-sm text-slate-500">Aktiviere Test-Benachrichtigungen. In den Event-Ansichten erscheint ein Button, der Benachrichtigungen nach fünf Sekunden auslöst.</p>
+                </div>
+                <label for="cfgDebug" class="inline-flex cursor-pointer items-center gap-3 text-sm font-semibold text-slate-600">
+                  <input id="cfgDebug" type="checkbox" class="h-5 w-5 rounded border-slate-300 text-brand-purple focus:ring-brand-purple/40" ${safeConfig.debugNotifications ? "checked" : ""} />
+                  <span>Debug-Benachrichtigungen</span>
+                </label>
+              </div>
+            </div>
             <button type="submit" class="inline-flex w-full items-center justify-center rounded-2xl bg-brand-red px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-brand-red/40 transition duration-300 hover:scale-[1.02] hover:bg-brand-red/90 hover:shadow-brand-red/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/70">Konfiguration speichern</button>
           </form>
           <p id="configMessage" class="mt-2 min-h-[1.5rem] text-sm font-semibold text-slate-500"></p>
@@ -1320,9 +1681,13 @@
       const altitudeInput = document.getElementById("cfgAltitude");
       const speedInput = document.getElementById("cfgSpeed");
       const timeoutInput = document.getElementById("cfgTimeout");
+      const debugInput = document.getElementById("cfgDebug");
       if (altitudeInput) altitudeInput.value = safeConfig.altitudeThresholdFt || "";
       if (speedInput) speedInput.value = safeConfig.speedThresholdKt || "";
       if (timeoutInput) timeoutInput.value = safeConfig.offlineTimeoutSec || "";
+      if (debugInput) debugInput.checked = Boolean(safeConfig.debugNotifications);
+
+      setNotificationDebugEnabled(Boolean(safeConfig.debugNotifications));
 
       renderPlacesTable(places);
       updatePlaceFormState();
@@ -1342,7 +1707,8 @@
       return {
         altitudeThresholdFt: Number.isFinite(altitude) ? altitude : 0,
         speedThresholdKt: Number.isFinite(speed) ? speed : 0,
-        offlineTimeoutSec: Number.isFinite(timeout) ? timeout : 0
+        offlineTimeoutSec: Number.isFinite(timeout) ? timeout : 0,
+        debugNotifications: Boolean(data.debugNotifications)
       };
     }
 
@@ -1490,7 +1856,12 @@
       try {
         const list = await fetchEventsList();
         currentEvents = Array.isArray(list) ? list : [];
+        markEventsAsDelivered(currentEvents);
         renderEventsTable(currentEvents);
+        if (activeView === "events" && !document.querySelector('[data-event-detail-root="true"]')) {
+          renderEventsOverview(currentEvents);
+        }
+        updateDebugButtonVisibility();
         if (showStatus) {
           showEventsSettingsMessage("Events aktualisiert.", "success");
         } else {
@@ -1592,6 +1963,7 @@
       const altitudeInput = document.getElementById("cfgAltitude");
       const speedInput = document.getElementById("cfgSpeed");
       const timeoutInput = document.getElementById("cfgTimeout");
+      const debugInput = document.getElementById("cfgDebug");
 
       const altitude = parseNumberInput(altitudeInput ? altitudeInput.value : "");
       if (altitude === null || altitude <= 0) {
@@ -1611,6 +1983,8 @@
         return;
       }
 
+      const debugEnabled = !!(debugInput && debugInput.checked);
+
       showConfigMessage("Speichere...", "");
 
       try {
@@ -1620,7 +1994,8 @@
           body: JSON.stringify({
             altitudeThresholdFt: altitude,
             speedThresholdKt: speed,
-            offlineTimeoutSec: timeout
+            offlineTimeoutSec: timeout,
+            debugNotifications: debugEnabled
           })
         });
         const data = await res.json().catch(() => ({}));
@@ -1638,6 +2013,11 @@
         if (timeoutInput && data.offlineTimeoutSec !== undefined) {
           timeoutInput.value = data.offlineTimeoutSec;
         }
+        if (debugInput && data.debugNotifications !== undefined) {
+          debugInput.checked = Boolean(data.debugNotifications);
+        }
+
+        setNotificationDebugEnabled(Boolean(data.debugNotifications));
 
         showConfigMessage("Konfiguration gespeichert.", "success");
       } catch (err) {

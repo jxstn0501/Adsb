@@ -94,10 +94,15 @@ let consecutiveTimeoutCount = 0;
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
-  offlineTimeoutSec: 60
+  offlineTimeoutSec: 60,
+  debugNotifications: false
 };
 
 let config = { ...DEFAULT_CONFIG };
+
+const eventStreamClients = new Map();
+let eventStreamClientCounter = 0;
+const EVENT_STREAM_HEARTBEAT_MS = 30_000;
 
 // ===== Places storage =====
 async function loadPlacesFromDisk() {
@@ -160,6 +165,33 @@ function startPlacesWatcher() {
   }
 }
 
+function toBooleanFlag(value, defaultValue = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return defaultValue;
+    }
+
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "n", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return defaultValue;
+}
+
 function normalizeConfig(raw) {
   const normalized = { ...DEFAULT_CONFIG };
 
@@ -181,6 +213,8 @@ function normalizeConfig(raw) {
   if (timeout !== null && timeout >= 5) {
     normalized.offlineTimeoutSec = Math.round(timeout);
   }
+
+  normalized.debugNotifications = toBooleanFlag(raw.debugNotifications, DEFAULT_CONFIG.debugNotifications);
 
   return normalized;
 }
@@ -318,6 +352,108 @@ async function persistEvents() {
   }
 }
 
+function removeEventStreamClient(id) {
+  const client = eventStreamClients.get(id);
+  if (!client) {
+    return;
+  }
+
+  eventStreamClients.delete(id);
+
+  if (client.heartbeat) {
+    clearInterval(client.heartbeat);
+  }
+
+  if (client.res && !client.res.writableEnded) {
+    try {
+      client.res.end();
+    } catch (err) {
+      console.warn("⚠️ Event-Stream-Verbindung konnte nicht sauber geschlossen werden:", err.message);
+    }
+  }
+}
+
+function sendEventStreamMessage(client, eventName, payload) {
+  if (!client || !client.res || client.res.writableEnded) {
+    return false;
+  }
+
+  let serialized;
+  try {
+    serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
+  } catch (err) {
+    console.error("⚠️ Event-Stream-Payload konnte nicht serialisiert werden:", err.message);
+    return false;
+  }
+
+  try {
+    client.res.write(`event: ${eventName}\ndata: ${serialized}\n\n`);
+    return true;
+  } catch (err) {
+    console.error("⚠️ Schreiben zum Event-Stream-Client fehlgeschlagen:", err.message);
+    return false;
+  }
+}
+
+function broadcastEventUpdate(event, extra = {}) {
+  if (!eventStreamClients.size) {
+    return;
+  }
+
+  const payload = { ...extra, event };
+  for (const [clientId, client] of eventStreamClients.entries()) {
+    const success = sendEventStreamMessage(client, "update", payload);
+    if (!success) {
+      removeEventStreamClient(clientId);
+    }
+  }
+}
+
+function handleEventStreamRequest(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+
+  res.write("retry: 5000\n\n");
+
+  const clientId = ++eventStreamClientCounter;
+  const client = { id: clientId, res, heartbeat: null };
+  eventStreamClients.set(clientId, client);
+
+  client.heartbeat = setInterval(() => {
+    if (!client.res || client.res.writableEnded) {
+      removeEventStreamClient(clientId);
+      return;
+    }
+
+    const success = sendEventStreamMessage(client, "ping", { timestamp: Date.now() });
+    if (!success) {
+      removeEventStreamClient(clientId);
+    }
+  }, EVENT_STREAM_HEARTBEAT_MS);
+
+  const sent = sendEventStreamMessage(client, "init", {
+    events,
+    timestamp: new Date().toISOString()
+  });
+
+  if (!sent) {
+    removeEventStreamClient(clientId);
+    return;
+  }
+
+  const cleanup = () => {
+    removeEventStreamClient(clientId);
+  };
+
+  req.on("close", cleanup);
+  req.on("end", cleanup);
+  req.on("error", cleanup);
+}
+
 function eventPlaceMatchesTarget(eventPlace, { targetId, refLat, refLon, refName }) {
   if (!eventPlace) {
     return false;
@@ -449,10 +585,13 @@ function parseConfigPayload(payload) {
     throw new Error("Feld 'offlineTimeoutSec' muss mindestens 5 Sekunden betragen.");
   }
 
+  const debug = toBooleanFlag(payload.debugNotifications, DEFAULT_CONFIG.debugNotifications);
+
   return {
     altitudeThresholdFt: altitude,
     speedThresholdKt: speed,
-    offlineTimeoutSec: Math.round(timeout)
+    offlineTimeoutSec: Math.round(timeout),
+    debugNotifications: debug
   };
 }
 
@@ -1031,6 +1170,7 @@ async function registerEvent(type, record, options = {}) {
   events.push(event);
   await persistEvents();
   console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
+  broadcastEventUpdate(event, { reason: "new-event" });
 }
 
 // ===== Event Detection =====
@@ -1659,6 +1799,11 @@ async function handleRequest(req, res) {
 
   if (q.pathname === "/events") {
     sendJSON(res, 200, events);
+    return;
+  }
+
+  if (q.pathname === "/events/stream") {
+    handleEventStreamRequest(req, res);
     return;
   }
 

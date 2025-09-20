@@ -1,5 +1,6 @@
 {
   "altitudeThresholdFt": 300,
   "speedThresholdKt": 40,
-  "offlineTimeoutSec": 60
+  "offlineTimeoutSec": 60,
+  "debugNotifications": false
 }
