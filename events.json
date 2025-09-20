@@ -258,5 +258,43 @@
     "place": {
       "type": "external"
     }
+  },
+  {
+    "time": "2025-09-20T17:36:12.141Z",
+    "type": "landing",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.409,
+    "alt": 275,
+    "gs": 5,
+    "lastSeen": 52,
+    "id": "20",
+    "place": {
+      "id": "mfqxpgb7",
+      "name": "HGW Uni",
+      "type": "Base",
+      "lat": 54.089087,
+      "lon": 13.408101
+    }
+  },
+  {
+    "time": "2025-09-20T20:33:32.540Z",
+    "type": "landing",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.409,
+    "alt": 275,
+    "gs": 8,
+    "lastSeen": 53,
+    "id": "21",
+    "place": {
+      "id": "mfqxpgb7",
+      "name": "HGW Uni",
+      "type": "Base",
+      "lat": 54.089087,
+      "lon": 13.408101
+    }
   }
 ]

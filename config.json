@@ -1,6 +1,9 @@
 {
   "altitudeThresholdFt": 300,
   "speedThresholdKt": 40,
-  "offlineTimeoutSec": 60,
-  "placeMatchRadiusMeters": 500
+  "offlineTimeoutSec": 50,
+  "placeMatchRadiusMeters": 500,
+  "notificationsEnabled": false,
+  "notifyOnTakeoff": true,
+  "notifyOnLanding": true
 }
