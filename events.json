@@ -209,5 +209,24 @@
       "lat": 54.089087,
       "lon": 13.408101
     }
+  },
+  {
+    "time": "2025-09-20T14:41:33.339Z",
+    "type": "takeoff",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.087,
+    "lon": 13.407,
+    "alt": 325,
+    "gs": 45,
+    "lastSeen": 3,
+    "id": "17",
+    "place": {
+      "id": "mfqxpgb7",
+      "name": "HGW Uni",
+      "type": "Base",
+      "lat": 54.089087,
+      "lon": 13.408101
+    }
   }
 ]
