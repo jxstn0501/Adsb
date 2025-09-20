@@ -223,10 +223,16 @@
     };
     const NOTIFICATION_EVENT_TYPES = new Set(["takeoff", "landing"]);
     let notificationPreferences = { ...DEFAULT_NOTIFICATION_SETTINGS };
+    const NOTIFICATION_DEBUG_STORAGE_KEY = "heli-tracker-debug-notifications";
+    let notificationPreferencesReady = false;
+    let notificationPreferencesReadyPromise = null;
+    let notificationDebugMode = loadNotificationDebugMode();
     let serviceWorkerReadyPromise = null;
     let eventStreamSource = null;
     let eventStreamReconnectTimer = null;
     let lastReceivedEventId = null;
+    let activeEventDetail = null;
+    let debugNotificationTimer = null;
     const navInactiveButtonClasses = ["text-slate-500", "bg-transparent", "shadow-none", "scale-100"];
     const navActiveButtonClasses = [
       "text-brand-purple",
@@ -336,6 +342,7 @@
         notifyOnTakeoff: takeoff,
         notifyOnLanding: landing
       };
+      notificationPreferencesReady = true;
     }
 
     async function ensureServiceWorkerReady() {
@@ -390,6 +397,50 @@
       }
     }
 
+    async function ensureNotificationPreferencesReady() {
+      if (notificationPreferencesReady) {
+        return;
+      }
+
+      if (!notificationPreferencesReadyPromise) {
+        notificationPreferencesReadyPromise = preloadConfigForNotifications();
+      }
+
+      try {
+        await notificationPreferencesReadyPromise;
+      } catch (err) {
+        console.warn("[Notifications] Voreinstellungen konnten nicht geladen werden:", err);
+      }
+    }
+
+    function loadNotificationDebugMode() {
+      try {
+        if (typeof window === "undefined" || !window.localStorage) {
+          return false;
+        }
+        const value = window.localStorage.getItem(NOTIFICATION_DEBUG_STORAGE_KEY);
+        return value === "1";
+      } catch (err) {
+        console.warn("[Notifications] Debug-Modus konnte nicht geladen werden:", err);
+        return false;
+      }
+    }
+
+    function saveNotificationDebugMode(enabled) {
+      try {
+        if (typeof window === "undefined" || !window.localStorage) {
+          return;
+        }
+        if (enabled) {
+          window.localStorage.setItem(NOTIFICATION_DEBUG_STORAGE_KEY, "1");
+        } else {
+          window.localStorage.removeItem(NOTIFICATION_DEBUG_STORAGE_KEY);
+        }
+      } catch (err) {
+        console.warn("[Notifications] Debug-Modus konnte nicht gespeichert werden:", err);
+      }
+    }
+
     function preloadConfigForNotifications() {
       return fetchConfig()
         .then(config => {
@@ -400,6 +451,7 @@
         .catch(err => {
           console.warn("[Notifications] Konfiguration konnte nicht geladen werden:", err);
           notificationPreferences = { ...DEFAULT_NOTIFICATION_SETTINGS };
+          notificationPreferencesReady = true;
           return null;
         });
     }
@@ -519,6 +571,10 @@
     }
 
     function setActiveView(view) {
+      if (view !== "events") {
+        cancelDebugNotificationTimer();
+        activeEventDetail = null;
+      }
       activeView = view;
       const buttons = document.querySelectorAll('.nav-item[data-view]');
       const viewTitle = document.getElementById("viewTitle");
@@ -585,7 +641,7 @@
 
     async function initializeTracker() {
       void ensureServiceWorkerReady();
-      void preloadConfigForNotifications();
+      notificationPreferencesReadyPromise = preloadConfigForNotifications();
       startEventStream();
 
       const container = document.getElementById("content");
@@ -777,6 +833,7 @@
     }
 
     async function showNotificationForEvent(event) {
+      await ensureNotificationPreferencesReady();
       if (!shouldNotifyForEvent(event)) {
         return;
       }
@@ -797,6 +854,19 @@
       }
     }
 
+    function cloneEventForNotification(rawEvent) {
+      if (!rawEvent || typeof rawEvent !== "object") {
+        return null;
+      }
+
+      const clone = { ...rawEvent };
+      if (clone.place && typeof clone.place === "object") {
+        clone.place = { ...clone.place };
+      }
+
+      return clone;
+    }
+
     function processIncomingEvent(rawEvent) {
       if (!rawEvent || typeof rawEvent !== "object") {
         return;
@@ -807,9 +877,9 @@
         return;
       }
 
-      const event = { ...rawEvent };
-      if (event.place && typeof event.place === "object") {
-        event.place = { ...event.place };
+      const event = cloneEventForNotification(rawEvent);
+      if (!event) {
+        return;
       }
 
       currentEvents = Array.isArray(currentEvents) ? [...currentEvents] : [];
@@ -929,15 +999,92 @@
       }
     }
 
+    function updateEventDebugStatus(message, type = "info") {
+      const el = document.getElementById("eventDebugStatus");
+      if (!el) {
+        return;
+      }
+
+      let color = "text-amber-700";
+      if (type === "success") {
+        color = "text-emerald-600";
+      } else if (type === "error") {
+        color = "text-rose-600";
+      }
+
+      el.className = `mt-1 text-xs font-semibold ${color}`;
+      el.textContent = message || "";
+    }
+
+    function cancelDebugNotificationTimer() {
+      if (debugNotificationTimer) {
+        clearTimeout(debugNotificationTimer);
+        debugNotificationTimer = null;
+      }
+    }
+
+    async function scheduleDebugNotificationForEvent(event) {
+      if (!notificationDebugMode) {
+        updateEventDebugStatus("Debug-Modus ist deaktiviert.", "error");
+        return;
+      }
+
+      if (!isNotificationSupported()) {
+        updateEventDebugStatus("Benachrichtigungen werden nicht unterstützt.", "error");
+        return;
+      }
+
+      const payload = cloneEventForNotification(event);
+      if (!payload) {
+        updateEventDebugStatus("Keine Eventdaten verfügbar.", "error");
+        return;
+      }
+
+      await ensureNotificationPreferencesReady();
+      if (!shouldNotifyForEvent(payload)) {
+        updateEventDebugStatus("Benachrichtigungen für dieses Event sind deaktiviert.", "error");
+        return;
+      }
+
+      cancelDebugNotificationTimer();
+      updateEventDebugStatus("Debug-Benachrichtigung wird in 5 Sekunden gesendet...", "info");
+
+      debugNotificationTimer = setTimeout(async () => {
+        try {
+          await showNotificationForEvent(payload);
+          updateEventDebugStatus("Debug-Benachrichtigung wurde gesendet.", "success");
+        } catch (err) {
+          console.warn("[Notifications] Debug-Benachrichtigung fehlgeschlagen:", err);
+          updateEventDebugStatus("Debug-Benachrichtigung konnte nicht gesendet werden.", "error");
+        } finally {
+          debugNotificationTimer = null;
+        }
+      }, 5000);
+    }
+
     function renderEventDetail(event) {
       stopSettingsInterval();
       setActiveView("events");
       closeSidebar();
 
+      cancelDebugNotificationTimer();
       cleanupEventMap();
 
       const target = document.getElementById("content");
       if (!target) return;
+
+      const normalizedEvent = cloneEventForNotification(event);
+      if (!normalizedEvent) {
+        target.innerHTML = `
+          <section class="view-panel space-y-6">
+            ${createEmptyCard("Event konnte nicht geladen werden.")}
+          </section>`;
+        activeEventDetail = null;
+        return;
+      }
+
+      event = normalizedEvent;
+      activeEventDetail = normalizedEvent;
 
       const latRaw = event && Object.prototype.hasOwnProperty.call(event, "lat") ? event.lat : null;
       const lonRaw = event && Object.prototype.hasOwnProperty.call(event, "lon") ? event.lon : null;
@@ -955,6 +1102,7 @@
         : null;
 
       const typeRaw = typeof event?.type === "string" ? event.type : "";
+      const typeNormalized = typeRaw.toLowerCase();
       const typeLabel = typeRaw ? typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1) : "Event";
       const callsign = event?.callsign || event?.hex || "—";
       const hexLabel = event?.hex ? String(event.hex).toUpperCase() : String(callsign || "—").toUpperCase();
@@ -962,6 +1110,8 @@
       const locationLabel = getEventLocationLabel(event);
       const altitudeLabel = formatMetricValue(event?.alt, "ft");
       const speedLabel = formatMetricValue(event?.gs, "kt");
+
+      const showDebugButton = notificationDebugMode && NOTIFICATION_EVENT_TYPES.has(typeNormalized);
 
       const mapAction = mapsLink
         ? `<a
@@ -977,6 +1127,20 @@
               In Google Maps öffnen
             </a>`
         : `<span class="inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-500">Keine Koordinaten verfügbar</span>`;
+
+      const debugSection = showDebugButton
+        ? `<div class="rounded-3xl border border-amber-200/60 bg-amber-50/60 px-5 py-5 shadow-inner shadow-amber-100/60">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 class="text-base font-semibold text-amber-800">Debug-Benachrichtigung</h4>
+                <p id="eventDebugStatus" class="mt-1 text-xs font-semibold text-amber-700">Sende eine Benachrichtigung 5 Sekunden nach Klick.</p>
+              </div>
+              <button id="eventDebugTrigger" type="button" class="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white shadow-lg shadow-amber-500/40 transition duration-300 hover:scale-[1.02] hover:bg-amber-500/90 hover:shadow-amber-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70">
+                Verzögert testen
+              </button>
+            </div>
+          </div>`
+        : "";
 
       target.innerHTML = `
         <section class="view-panel space-y-6">
@@ -1018,9 +1182,19 @@
             ${createInfoCard("Speed", speedLabel)}
             ${createInfoCard("Altitude", altitudeLabel)}
           </div>
+          ${debugSection}
         </section>`;
 
       target.scrollTop = 0;
+
+      if (showDebugButton) {
+        const debugButton = document.getElementById("eventDebugTrigger");
+        if (debugButton) {
+          debugButton.addEventListener("click", () => {
+            void scheduleDebugNotificationForEvent(event);
+          });
+        }
+      }
 
       if (!hasCoords) {
         return;
@@ -1113,6 +1287,8 @@
       setActiveView("events");
       closeSidebar();
       cleanupEventMap();
+      cancelDebugNotificationTimer();
+      activeEventDetail = null;
       eventDetailReturnState = { mode: "overview", groupKey: null };
 
       const container = document.getElementById("content");
@@ -1383,6 +1559,8 @@
     }
 
     function handleEventDetailBack() {
+      cancelDebugNotificationTimer();
+      activeEventDetail = null;
       const targetKey = eventDetailReturnState && eventDetailReturnState.mode === "group"
         ? eventDetailReturnState.groupKey
         : null;
@@ -2166,6 +2344,19 @@
                 <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
                   <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
+                      <h4 class="text-base font-semibold text-slate-900">Debug Modus</h4>
+                      <p class="text-xs text-slate-500">Blendt einen Test-Button in Eventdetails ein und löst Benachrichtigungen verzögert aus.</p>
+                    </div>
+                    <label class="relative inline-flex cursor-pointer items-center">
+                      <input id="notificationsDebug" type="checkbox" class="peer sr-only" />
+                      <span class="h-11 w-20 rounded-full bg-slate-200 transition-all duration-300 peer-checked:bg-amber-400/80"></span>
+                      <span class="absolute left-1 top-1 h-9 w-9 rounded-full bg-white shadow-md transition-all duration-300 peer-checked:translate-x-9"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="rounded-3xl border border-slate-100/80 bg-white/80 px-5 py-5 shadow-inner shadow-white/50">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
                       <h4 class="text-base font-semibold text-slate-900">Testen</h4>
                       <p class="text-xs text-slate-500">Sende eine Probe-Benachrichtigung an dein Gerät.</p>
                     </div>
@@ -2290,6 +2481,7 @@
       const takeoffInput = document.getElementById("notificationsTakeoff");
       const landingInput = document.getElementById("notificationsLanding");
       const testButton = document.getElementById("notificationsTestButton");
+      const debugInput = document.getElementById("notificationsDebug");
 
       if (enabledInput) {
         enabledInput.addEventListener("change", handleNotificationsEnabledChange);
@@ -2302,6 +2494,9 @@
       }
       if (testButton) {
         testButton.addEventListener("click", triggerNotificationTest);
+      }
+      if (debugInput) {
+        debugInput.addEventListener("change", handleNotificationDebugToggle);
       }
     }
 
@@ -2334,6 +2529,7 @@
       const enabledInput = document.getElementById("notificationsEnabled");
       const takeoffInput = document.getElementById("notificationsTakeoff");
       const landingInput = document.getElementById("notificationsLanding");
+      const debugInput = document.getElementById("notificationsDebug");
 
       const supported = isNotificationSupported();
       const permissionDenied = supported && typeof Notification !== "undefined" && Notification.permission === "denied";
@@ -2352,6 +2548,10 @@
       if (landingInput) {
         landingInput.checked = !!(notificationPreferences && notificationPreferences.notifyOnLanding);
         landingInput.disabled = !supported || !enabled;
+      }
+
+      if (debugInput) {
+        debugInput.checked = !!notificationDebugMode;
       }
 
       updateNotificationSupportHint();
@@ -2445,6 +2645,15 @@
       notificationPreferences.notifyOnLanding = !!(event && event.target && event.target.checked);
       updateNotificationControlsFromState();
       await persistNotificationPreferences();
+    }
+
+    function handleNotificationDebugToggle(event) {
+      notificationDebugMode = !!(event && event.target && event.target.checked);
+      saveNotificationDebugMode(notificationDebugMode);
+
+      if (activeView === "events" && activeEventDetail) {
+        renderEventDetail(activeEventDetail);
+      }
     }
 
     async function triggerNotificationTest() {
