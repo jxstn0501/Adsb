@@ -1,0 +1,99 @@
+.AltitudeRoll {
+  font-size: 10px;
+  position: absolute;
+  /* top: 152.4px; */
+  height: 325px;
+  /* width: 100px; */
+  /* left: 25px; */
+  /* border: solid; */
+  /* border-color: yellow; */
+}
+
+.AltitudeRoll .SpeedContainer {
+  position: relative;
+  height: 100%;
+  width: 52px;
+  display: inline-block;
+}
+
+.AltitudeRoll .SpeedLabel {
+  position: absolute;
+  /* float: right; */
+  right: 0px;
+  color: white;
+  z-index: 0;
+}
+
+.AltitudeRoll .SpeedLabel .SpeedNumber {
+  position: relative;
+  right: 13px;
+  top: 13px;
+}
+
+svg.VerticalLine {
+  position: absolute;
+  right: 0px;
+  height:3000px;
+  bottom: 113px;
+}
+
+svg.VerticalLine line {
+  stroke: rgb(255, 255, 255);
+  stroke-width: 1;
+}
+
+svg.Overspeed {
+  position: absolute;
+  height:1000px;
+  width: 10px;
+}
+
+svg.Overspeed line {
+  stroke: rgb(255, 0, 0);
+  stroke-width: 10;
+}
+
+svg.baseline {
+  position: absolute;
+  bottom: -1.2px;
+  right: 0px;
+}
+
+svg.baseline line {
+  stroke: rgb(255, 255, 255);
+  stroke-width: 1;
+}
+
+svg.SpeedBottomLine {
+  position: absolute;
+  bottom: -1px;
+  /* right: -19px; */
+  left: -2px;
+  width: 87px;
+}
+
+svg.SpeedBottomLine line {
+  z-index: 200;
+  stroke: rgb(255, 255, 255);
+  stroke-width: 1;
+}
+
+.AltitudeRoll .SpeedNumber {
+  position: relative;
+  margin-right: -4px;
+  font-size: 22px;
+  top: 5px;
+}
+
+.AltitudeRoll .ZeroSpeed {
+  position: relative;
+  border-right: 10px;
+}
+
+.ApAirspeedDigitsBottom {
+  position: relative;
+  color: #eb9ce2;
+  font-size: 2em;
+  right: 15px;
+  text-align: right;
+}

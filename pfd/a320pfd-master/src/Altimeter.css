@@ -1,0 +1,65 @@
+.Altimeter {
+  font-size: 10px;
+  position: "absolute";
+  top: 151px;
+  left: 440px;
+  height: 325px;
+  width: 110px;
+  overflow: hidden;
+}
+
+.DigitsContainer {
+  position: absolute;
+  left: 25px;
+}
+
+.BigDigitsContainer {
+  font-size: 28px;
+  color: #3ae061;
+  border-bottom: solid 2px yellow;
+  border-top: solid 2px yellow;
+  box-sizing: border-box; 
+  background: black;
+  position: absolute;
+  top:146px;
+  height: 33px;
+  width: 52px;
+  z-index: 11;
+  overflow: hidden;
+}
+
+.SmallDigitsContainer {
+  font-size: 17px;
+  border: solid 2px yellow;
+  color: #3ae061;
+  position: absolute;
+  top:135px;
+  height: 53px;
+  left: 50px;
+  width: 35px;
+  z-index: 10;
+  overflow: hidden;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.Digit{
+  position: absolute;
+  margin-top: -10.88em;
+  line-height: 1em;
+}
+
+.Digit:nth-child(2) {
+  left: 0.6em;
+}
+
+.Digit:nth-child(3) {
+  left: 1.3em;
+}
+
+.TwoLast {
+  margin-top: -4.85em;
+  margin-left: 5px;
+  line-height: 1em;
+  top: 3.8em;
+}
