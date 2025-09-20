@@ -228,5 +228,35 @@
       "lat": 54.089087,
       "lon": 13.408101
     }
+  },
+  {
+    "time": "2025-09-20T16:55:27.499Z",
+    "type": "landing",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 53.545,
+    "lon": 13.291,
+    "alt": 300,
+    "gs": 4,
+    "lastSeen": 63,
+    "id": "18",
+    "place": {
+      "type": "external"
+    }
+  },
+  {
+    "time": "2025-09-20T17:16:18.251Z",
+    "type": "takeoff",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 53.545,
+    "lon": 13.291,
+    "alt": 350,
+    "gs": 2,
+    "lastSeen": 0,
+    "id": "19",
+    "place": {
+      "type": "external"
+    }
   }
 ]
