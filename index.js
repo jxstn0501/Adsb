@@ -15,7 +15,6 @@ let events = [];          // Takeoff/Landing-Events
 let flightStatus = {};    // Status- & Verlaufdaten pro Flugzeug
 const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
-codex/add-history-log-endpoint-and-ui-features
 const logsHistoryDir = path.join(__dirname, "logs_history");
 const historyLogsDir = path.join(__dirname, "logs_history");
 const HISTORY_REQUEST_INTERVAL_MS = 2_000;
