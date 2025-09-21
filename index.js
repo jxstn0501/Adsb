@@ -71,7 +71,8 @@ const DEFAULT_CONFIG = {
   placeMatchRadiusMeters: DEFAULT_PLACE_MATCH_RADIUS_METERS,
   notificationsEnabled: false,
   notifyOnTakeoff: true,
-  notifyOnLanding: true
+  notifyOnLanding: true,
+  adsbHistoryAuthHeader: ""
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -333,6 +334,18 @@ function parseAircraftPayload(payload) {
   return { name };
 }
 
+function sanitizeHistoryAuthHeader(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim();
+}
+
 function normalizeConfig(raw) {
   const normalized = { ...DEFAULT_CONFIG };
 
@@ -363,6 +376,10 @@ function normalizeConfig(raw) {
   normalized.notificationsEnabled = raw.notificationsEnabled === true;
   normalized.notifyOnTakeoff = raw.notifyOnTakeoff !== false;
   normalized.notifyOnLanding = raw.notifyOnLanding !== false;
+
+  if (Object.prototype.hasOwnProperty.call(raw, "adsbHistoryAuthHeader")) {
+    normalized.adsbHistoryAuthHeader = sanitizeHistoryAuthHeader(raw.adsbHistoryAuthHeader);
+  }
 
   return normalized;
 }
@@ -883,6 +900,18 @@ function parseConfigPayload(payload) {
   const notifyOnLanding = payload.notifyOnLanding !== undefined
     ? payload.notifyOnLanding !== false
     : currentConfig.notifyOnLanding !== false;
+  let adsbHistoryAuthHeader = sanitizeHistoryAuthHeader(currentConfig.adsbHistoryAuthHeader);
+
+  if (Object.prototype.hasOwnProperty.call(payload, "adsbHistoryAuthHeader")) {
+    const rawHeader = payload.adsbHistoryAuthHeader;
+    if (rawHeader === null || rawHeader === undefined) {
+      adsbHistoryAuthHeader = "";
+    } else if (typeof rawHeader === "string") {
+      adsbHistoryAuthHeader = rawHeader.trim();
+    } else {
+      throw new Error("Feld 'adsbHistoryAuthHeader' muss eine Zeichenkette sein oder leer gelassen werden.");
+    }
+  }
 
   return {
     altitudeThresholdFt: altitude,
@@ -891,7 +920,8 @@ function parseConfigPayload(payload) {
     placeMatchRadiusMeters: radius,
     notificationsEnabled,
     notifyOnTakeoff,
-    notifyOnLanding
+    notifyOnLanding,
+    adsbHistoryAuthHeader
   };
 }
 
@@ -1144,6 +1174,74 @@ function buildHistoryUrl(hex, dateString) {
   return `https://globe.adsbexchange.com/globe_history/data/${dateString}/traces/icao/${hex}_trace_full.json`;
 }
 
+function parseHistoryAuthHeaderConfig(rawHeader) {
+  const sanitized = sanitizeHistoryAuthHeader(rawHeader);
+  if (!sanitized) {
+    return null;
+  }
+
+  const lines = sanitized.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const headers = {};
+  const cookieParts = [];
+
+  for (const line of lines) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex === -1) {
+      cookieParts.push(line);
+      continue;
+    }
+
+    const name = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (!name || !value) {
+      continue;
+    }
+
+    if (name.toLowerCase() === "referer") {
+      continue;
+    }
+
+    headers[name] = value;
+  }
+
+  if (cookieParts.length > 0) {
+    const combinedCookie = cookieParts.join("; ");
+    if (headers.Cookie) {
+      headers.Cookie = `${headers.Cookie}; ${combinedCookie}`;
+    } else {
+      headers.Cookie = combinedCookie;
+    }
+  }
+
+  return Object.keys(headers).length > 0 ? headers : null;
+}
+
+function buildHistoryRequestHeaders() {
+  const headers = { Referer: ADSB_REFERER };
+  const configured = parseHistoryAuthHeaderConfig(config?.adsbHistoryAuthHeader);
+
+  if (configured) {
+    for (const [key, value] of Object.entries(configured)) {
+      if (!key || value === undefined || value === null || value === "") {
+        continue;
+      }
+
+      if (String(key).toLowerCase() === "referer") {
+        continue;
+      }
+
+      headers[key] = value;
+    }
+  }
+
+  return headers;
+}
+
 async function downloadHistoryForHex(hex, days = 14) {
   const normalizedHex = normalizeAircraftHex(hex);
   if (!normalizedHex) {
@@ -1190,7 +1288,7 @@ async function downloadHistoryForHex(hex, days = 14) {
       let response;
       try {
         response = await fetch(historyUrl, {
-          headers: { Referer: ADSB_REFERER }
+          headers: buildHistoryRequestHeaders()
         });
         performedRequestForDay = true;
       } catch (err) {
