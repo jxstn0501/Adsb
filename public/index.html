@@ -200,6 +200,14 @@
     const DEFAULT_ALTITUDE_THRESHOLD_FT = 300;
     const DEFAULT_SPEED_THRESHOLD_KT = 40;
     const DEFAULT_OFFLINE_TIMEOUT_SEC = 60;
+    const LOG_SOURCE_LIVE = "live";
+    const LOG_SOURCE_HISTORY = "history";
+    const LOG_HISTORY_LIMIT_DAYS = 14;
+    const LOG_DETAIL_ROW_LIMIT = 200;
+    const logOverviewCache = {
+      [LOG_SOURCE_LIVE]: [],
+      [LOG_SOURCE_HISTORY]: []
+    };
     let hexHistory = loadHexHistory();
     let currentHex = "";
     let settingsInterval = null;
@@ -217,6 +225,7 @@
     let currentEventGroups = [];
     let activeEventGroupKey = null;
     let cachedLogOverview = [];
+    let activeLogSource = LOG_SOURCE_LIVE;
     let activeLogHex = null;
     let activeSettingsSection = "aircraft";
     let eventDetailReturnState = { mode: "overview", groupKey: null };
@@ -253,6 +262,17 @@
       "to-brand-red/20",
       "text-brand-purple",
       "shadow-[0_10px_24px_rgba(111,93,247,0.35)]"
+    ];
+    const logSourceActiveClasses = [
+      "bg-brand-purple",
+      "text-white",
+      "shadow-card"
+    ];
+    const logSourceInactiveClasses = [
+      "bg-white/70",
+      "text-slate-500",
+      "shadow-inner",
+      "shadow-white/60"
     ];
     const settingsSectionOrder = ["aircraft", "thresholds", "notifications", "places", "events", "logs"];
     const settingsTabActiveClasses = [
@@ -294,6 +314,25 @@
       const minutes = String(date.getMinutes()).padStart(2, "0");
 
       return `${day}.${month}.${year} ${hours}:${minutes}`;
+    }
+
+    function formatDateLabel(value) {
+      if (typeof value !== "string") {
+        return "—";
+      }
+
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return "—";
+      }
+
+      const parts = trimmed.split("-");
+      if (parts.length === 3) {
+        const [year, month, day] = parts;
+        return `${day}.${month}.${year}`;
+      }
+
+      return trimmed;
     }
 
     function formatMetricValue(value, suffix) {
@@ -1757,6 +1796,91 @@
       return label || getFallbackLocationLabel(event.type);
     }
 
+    function getLogOverviewCacheForSource(source = activeLogSource) {
+      const key = source === LOG_SOURCE_HISTORY ? LOG_SOURCE_HISTORY : LOG_SOURCE_LIVE;
+      const cached = logOverviewCache[key];
+      return Array.isArray(cached) ? cached : [];
+    }
+
+    function updateCachedLogOverviewForSource(source, list) {
+      const key = source === LOG_SOURCE_HISTORY ? LOG_SOURCE_HISTORY : LOG_SOURCE_LIVE;
+      logOverviewCache[key] = Array.isArray(list) ? list : [];
+      if (key === activeLogSource) {
+        cachedLogOverview = getLogOverviewCacheForSource(key);
+      }
+    }
+
+    function updateLogSourceToggle() {
+      const buttons = document.querySelectorAll('[data-log-source]');
+      buttons.forEach(button => {
+        if (!button) {
+          return;
+        }
+        const source = button.getAttribute('data-log-source');
+        button.classList.remove(...logSourceActiveClasses, ...logSourceInactiveClasses);
+        const targetClasses = source === activeLogSource ? logSourceActiveClasses : logSourceInactiveClasses;
+        button.classList.add(...targetClasses);
+      });
+    }
+
+    function switchLogSource(source) {
+      const normalized = source === LOG_SOURCE_HISTORY ? LOG_SOURCE_HISTORY : LOG_SOURCE_LIVE;
+      if (normalized === activeLogSource && !activeLogHex) {
+        renderLogOverview(getLogOverviewCacheForSource(normalized));
+        return;
+      }
+
+      activeLogSource = normalized;
+      activeLogHex = null;
+      updateLogSourceToggle();
+      void loadLogOverview(normalized);
+    }
+
+    function findHistoryOverviewEntry(hex) {
+      const normalized = normalizeHex(hex);
+      if (!normalized) {
+        return null;
+      }
+      const historyCache = getLogOverviewCacheForSource(LOG_SOURCE_HISTORY);
+      return historyCache.find(entry => entry && normalizeHex(entry.hex) === normalized) || null;
+    }
+
+    function createLogTableRows(entries) {
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return "";
+      }
+
+      return entries.map(entry => {
+        const time = escapeHtml(formatDateTime(entry.time));
+        const callsign = escapeHtml(entry.callsign || entry.hex || "—");
+        const altitude = escapeHtml(formatMetricValue(entry.alt, "ft"));
+        const speed = escapeHtml(formatMetricValue(entry.gs, "kt"));
+
+        const latNum = Number(entry.lat);
+        const lonNum = Number(entry.lon);
+        const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
+        const position = hasCoords
+          ? `${latNum.toFixed(4)}°, ${lonNum.toFixed(4)}°`
+          : `${entry.lat ?? "—"}, ${entry.lon ?? "—"}`;
+        const safePosition = escapeHtml(position);
+
+        return `
+          <tr class="divide-x divide-slate-100/80">
+            <td class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">${time}</td>
+            <td class="px-4 py-3">
+              <div class="text-sm font-semibold text-slate-900">${callsign}</div>
+              <div class="text-xs uppercase tracking-[0.3em] text-slate-400">${escapeHtml(entry.hex || "")}</div>
+            </td>
+            <td class="px-4 py-3 text-sm font-medium text-slate-700">${altitude}</td>
+            <td class="px-4 py-3 text-sm font-medium text-slate-700">${speed}</td>
+            <td class="px-4 py-3 text-sm text-slate-600">
+              <div class="font-medium text-slate-700">${safePosition}</div>
+              <div class="text-xs text-slate-400">Lat • Lon</div>
+            </td>
+          </tr>`;
+      }).join("");
+    }
+
     function getSettingsLogsContainer() {
       return document.getElementById("settingsLogsContainer");
     }
@@ -1767,33 +1891,45 @@
       container.innerHTML = `<div class="rounded-3xl border border-slate-100/70 bg-white/90 px-6 py-5 text-sm font-medium text-slate-600 shadow-card">${escapeHtml(message)}</div>`;
     }
 
-    async function loadLogOverview() {
+    async function loadLogOverview(source = activeLogSource) {
+      const resolvedSource = source === LOG_SOURCE_HISTORY ? LOG_SOURCE_HISTORY : LOG_SOURCE_LIVE;
+      activeLogSource = resolvedSource;
       activeLogHex = null;
       const container = getSettingsLogsContainer();
       if (!container) {
         return;
       }
 
-      renderLogsMessage("Lade Logs...");
+      updateLogSourceToggle();
+      const loadingLabel = resolvedSource === LOG_SOURCE_HISTORY ? "Lade Historie..." : "Lade Logs...";
+      renderLogsMessage(loadingLabel);
 
       try {
-        const response = await fetch("/log");
+        const endpoint = resolvedSource === LOG_SOURCE_HISTORY ? "/history-log" : "/log";
+        const response = await fetch(endpoint);
+        if (response.status === 404) {
+          updateCachedLogOverviewForSource(resolvedSource, []);
+          cachedLogOverview = getLogOverviewCacheForSource(resolvedSource);
+          renderLogOverview(cachedLogOverview);
+          return;
+        }
         if (!response.ok) {
           throw new Error(`Serverantwort ${response.status}`);
         }
 
         const list = await response.json();
         const normalized = Array.isArray(list) ? list : [];
-        cachedLogOverview = normalized;
-        renderLogOverview(normalized);
+        updateCachedLogOverviewForSource(resolvedSource, normalized);
+        cachedLogOverview = getLogOverviewCacheForSource(resolvedSource);
+        renderLogOverview(cachedLogOverview);
       } catch (err) {
         console.error("[Logs] Übersicht konnte nicht geladen werden:", err);
         const message = err && err.message ? err.message : String(err);
         container.innerHTML = `
           <div class="space-y-4">
-            ${createEmptyCard(`Fehler beim Laden der Logs (${escapeHtml(message)})`)}
+            ${createEmptyCard(`${resolvedSource === LOG_SOURCE_HISTORY ? "Fehler beim Laden der Historie" : "Fehler beim Laden der Logs"} (${escapeHtml(message)})`)}
             <div class="flex justify-center">
-              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onclick="loadLogOverview()">Erneut versuchen</button>
+              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onclick="loadLogOverview('${resolvedSource}')">Erneut versuchen</button>
             </div>
           </div>`;
       }
@@ -1803,8 +1939,76 @@
       const container = getSettingsLogsContainer();
       if (!container) return;
 
+      const isHistory = activeLogSource === LOG_SOURCE_HISTORY;
+
       if (!Array.isArray(list) || list.length === 0) {
-        container.innerHTML = createEmptyCard("Keine Logs vorhanden");
+        container.innerHTML = createEmptyCard(isHistory ? "Keine Historie vorhanden" : "Keine Logs vorhanden");
+        return;
+      }
+
+      if (isHistory) {
+        const cards = list.map(entry => {
+          if (!entry) return "";
+          const hex = entry.hex ? String(entry.hex).toLowerCase() : "";
+          const hexLabel = hex ? hex.toUpperCase() : "—";
+          const name = entry.name ? String(entry.name) : "";
+          const title = name ? name : `HEX ${hexLabel}`;
+          const totalEntries = Number(entry.totalEntries) || 0;
+          const totalDays = Number(entry.totalDays) || 0;
+          const countLabel = totalEntries === 1 ? "1 Eintrag" : `${totalEntries} Einträge`;
+          const daysLabel = totalDays === 1 ? "1 Tag" : `${totalDays} Tage`;
+          const lastTimestamp = entry.lastTimestamp ? escapeHtml(formatDateTime(entry.lastTimestamp)) : "—";
+
+          let dayBadges = "";
+          if (Array.isArray(entry.days) && entry.days.length > 0) {
+            dayBadges = entry.days.slice(0, 6).map(day => {
+              if (!day) return "";
+              const dateLabel = formatDateLabel(day.date);
+              const records = Number(day.recordCount) || 0;
+              const badgeLabel = `${dateLabel} • ${records}`;
+              return `<span class="rounded-full bg-brand-purple/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-brand-purple/90">${escapeHtml(badgeLabel)}</span>`;
+            }).join("");
+          }
+
+          const extraCount = Array.isArray(entry.days) && entry.days.length > 6 ? entry.days.length - 6 : 0;
+          const extraBadge = extraCount > 0
+            ? `<span class="rounded-full bg-slate-200 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-500">+${extraCount}</span>`
+            : "";
+
+          const buttonDisabled = !hex;
+          const buttonAttributes = buttonDisabled
+            ? 'type="button" disabled'
+            : `type="button" onclick="openHistoryDetail('${escapeHtml(hex)}')"`;
+          const buttonClasses = buttonDisabled
+            ? "inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400"
+            : "inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-4 py-2 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50";
+
+          return `
+            <article class="group flex flex-col gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_25px_45px_rgba(111,93,247,0.2)]">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-2">
+                  <h3 class="text-xl font-semibold text-brand-ink">${escapeHtml(title)}</h3>
+                  <p class="text-xs uppercase tracking-[0.3em] text-slate-400">HEX ${escapeHtml(hexLabel)}</p>
+                  <p class="text-sm text-slate-500">${escapeHtml(countLabel)} • ${escapeHtml(daysLabel)}</p>
+                  <p class="text-xs text-slate-400">Letzte Aktualisierung: ${lastTimestamp}</p>
+                </div>
+                <span class="rounded-full bg-brand-purple/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-brand-purple">14-Tage Historie</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-500">
+                ${dayBadges || `<span class="rounded-full bg-slate-100 px-3 py-1 text-[0.65rem] font-semibold text-slate-400">Keine Tagesdateien</span>`}
+                ${extraBadge}
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-[0.3em] text-slate-400">Historie</span>
+                <button ${buttonAttributes} class="${buttonClasses} ${buttonDisabled ? "cursor-not-allowed" : ""}">
+                  <span>Details ansehen</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </article>`;
+        }).join("");
+
+        container.innerHTML = cards;
         return;
       }
 
@@ -1858,6 +2062,9 @@
         return;
       }
 
+      activeLogSource = LOG_SOURCE_LIVE;
+      updateLogSourceToggle();
+      cachedLogOverview = getLogOverviewCacheForSource(LOG_SOURCE_LIVE);
       activeLogHex = targetHex;
       const container = getSettingsLogsContainer();
       if (!container) return;
@@ -1903,36 +2110,12 @@
         return;
       }
 
-      const limited = data.slice(-200).reverse();
-      const rows = limited.map(entry => {
-        const time = escapeHtml(formatDateTime(entry.time));
-        const callsign = escapeHtml(entry.callsign || entry.hex || "—");
-        const altitude = escapeHtml(formatMetricValue(entry.alt, "ft"));
-        const speed = escapeHtml(formatMetricValue(entry.gs, "kt"));
-
-        const latNum = Number(entry.lat);
-        const lonNum = Number(entry.lon);
-        const hasCoords = Number.isFinite(latNum) && Number.isFinite(lonNum);
-        const position = hasCoords
-          ? `${latNum.toFixed(4)}°, ${lonNum.toFixed(4)}°`
-          : `${entry.lat ?? "—"}, ${entry.lon ?? "—"}`;
-        const safePosition = escapeHtml(position);
-
-        return `
-          <tr class="divide-x divide-slate-100/80">
-            <td class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">${time}</td>
-            <td class="px-4 py-3">
-              <div class="text-sm font-semibold text-slate-900">${callsign}</div>
-              <div class="text-xs uppercase tracking-[0.3em] text-slate-400">${escapeHtml(entry.hex || "")}</div>
-            </td>
-            <td class="px-4 py-3 text-sm font-medium text-slate-700">${altitude}</td>
-            <td class="px-4 py-3 text-sm font-medium text-slate-700">${speed}</td>
-            <td class="px-4 py-3 text-sm text-slate-600">
-              <div class="font-medium text-slate-700">${safePosition}</div>
-              <div class="text-xs text-slate-400">Lat • Lon</div>
-            </td>
-          </tr>`;
-      }).join("");
+      const limited = Array.isArray(data) ? data.slice(-LOG_DETAIL_ROW_LIMIT).reverse() : [];
+      const rows = createLogTableRows(limited);
+      const totalCount = Array.isArray(data) ? data.length : 0;
+      const limitNote = totalCount > limited.length
+        ? `Zeige neueste ${limited.length} von ${totalCount} Einträgen`
+        : `Anzahl Einträge: ${limited.length}`;
 
       const overviewEntry = cachedLogOverview.find(item => item && String(item.hex).toLowerCase() === hex);
       const callsign = overviewEntry && overviewEntry.last ? overviewEntry.last.callsign : (data[data.length - 1]?.callsign ?? "—");
@@ -1957,6 +2140,186 @@
             <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">${latestLabel}</span>
           </div>
           <div class="rounded-2xl border border-brand-purple/10 bg-white shadow-card">
+            <div class="border-b border-slate-100/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(limitNote)}</div>
+            <div class="max-h-[70vh] overflow-auto">
+              <table class="min-w-full divide-y divide-slate-100 text-left">
+                <thead class="sticky top-0 bg-brand-frost/90 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                  <tr>
+                    <th scope="col" class="px-4 py-3">Zeit</th>
+                    <th scope="col" class="px-4 py-3">Callsign</th>
+                    <th scope="col" class="px-4 py-3">Altitude</th>
+                    <th scope="col" class="px-4 py-3">Speed</th>
+                    <th scope="col" class="px-4 py-3">Position</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100/80 bg-white">
+                  ${rows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function openHistoryDetail(hex) {
+      const targetHex = typeof hex === "string" ? hex.trim().toLowerCase() : "";
+      if (!targetHex) {
+        return;
+      }
+
+      activeLogSource = LOG_SOURCE_HISTORY;
+      updateLogSourceToggle();
+      cachedLogOverview = getLogOverviewCacheForSource(LOG_SOURCE_HISTORY);
+      activeLogHex = targetHex;
+      const container = getSettingsLogsContainer();
+      if (!container) return;
+
+      renderLogsMessage("Lade Historie...");
+
+      try {
+        const response = await fetch(`/history-log?hex=${encodeURIComponent(targetHex)}`);
+        if (response.status === 404) {
+          renderHistoryDetail(targetHex, [], null);
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(`Serverantwort ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const records = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
+        renderHistoryDetail(targetHex, records, Array.isArray(payload) ? null : payload);
+      } catch (err) {
+        console.error("[Logs] Historie konnte nicht geladen werden:", err);
+        const message = err && err.message ? err.message : String(err);
+        container.innerHTML = `
+          <div class="space-y-4">
+            ${createEmptyCard(`Fehler beim Laden der Historie (${escapeHtml(message)})`)}
+            <div class="flex flex-wrap justify-center gap-3">
+              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300" onclick="returnToLogOverview()">Zurück</button>
+              <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-brand-purple px-5 py-3 text-sm font-semibold text-white shadow-card transition duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50" onclick="openHistoryDetail('${escapeHtml(targetHex)}')">Erneut versuchen</button>
+            </div>
+          </div>`;
+      }
+    }
+
+    function renderHistoryDetail(hex, data, payloadMeta) {
+      const container = getSettingsLogsContainer();
+      if (!container) return;
+
+      const normalizedHex = normalizeHex(hex);
+      const overviewEntry = findHistoryOverviewEntry(normalizedHex);
+      const title = overviewEntry && overviewEntry.name ? overviewEntry.name : `HEX ${(normalizedHex || "").toUpperCase()}`;
+      const headingHex = normalizedHex ? normalizedHex.toUpperCase() : "—";
+      const records = Array.isArray(data) ? data : [];
+      const limited = records.slice(-LOG_DETAIL_ROW_LIMIT).reverse();
+      const rows = createLogTableRows(limited);
+      const totalCount = records.length;
+      const limitNote = totalCount > limited.length
+        ? `Zeige neueste ${limited.length} von ${totalCount} Einträgen`
+        : `Anzahl Einträge: ${limited.length}`;
+      const latestLabel = limited.length > 0 ? escapeHtml(formatDateTime(limited[0].time)) : "—";
+
+      const rangeMeta = payloadMeta && payloadMeta.range && Array.isArray(payloadMeta.range.days)
+        ? payloadMeta.range
+        : overviewEntry
+          ? {
+              limitDays: LOG_HISTORY_LIMIT_DAYS,
+              totalDays: Number(overviewEntry.totalDays) || (Array.isArray(overviewEntry.days) ? overviewEntry.days.length : 0),
+              days: Array.isArray(overviewEntry.days) ? overviewEntry.days : []
+            }
+          : {
+              limitDays: LOG_HISTORY_LIMIT_DAYS,
+              totalDays: 0,
+              days: []
+            };
+
+      const summaryDays = Array.isArray(rangeMeta.days) ? rangeMeta.days : [];
+      const summaryTotalDays = Number(rangeMeta.totalDays) || summaryDays.length;
+      const summaryDaysLabel = summaryTotalDays === 1 ? "1 Tag" : `${summaryTotalDays} Tage`;
+      const summaryTotalEntries = Number(payloadMeta && payloadMeta.total) || totalCount;
+      const summaryEntriesLabel = summaryTotalEntries === 1 ? "1 Eintrag" : `${summaryTotalEntries} Einträge`;
+      const rangeLimitLabel = rangeMeta.limitDays ? `${rangeMeta.limitDays}-Tage Limit` : "Historie";
+      const lastTimestamp = payloadMeta && payloadMeta.lastTimestamp
+        ? payloadMeta.lastTimestamp
+        : (overviewEntry && overviewEntry.lastTimestamp ? overviewEntry.lastTimestamp : null);
+      const lastTimestampLabel = lastTimestamp ? escapeHtml(formatDateTime(lastTimestamp)) : latestLabel;
+
+      const dayBadges = summaryDays.slice(0, 6).map(day => {
+        if (!day) return "";
+        const dateLabel = formatDateLabel(day.date);
+        const count = Number(day.recordCount) || 0;
+        const badgeLabel = `${dateLabel} • ${count}`;
+        return `<span class="rounded-full bg-brand-purple/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-brand-purple/90">${escapeHtml(badgeLabel)}</span>`;
+      }).join("");
+      const extraBadgeCount = summaryDays.length > 6 ? summaryDays.length - 6 : 0;
+      const extraBadge = extraBadgeCount > 0
+        ? `<span class="rounded-full bg-slate-200 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-500">+${extraBadgeCount}</span>`
+        : "";
+
+      if (limited.length === 0) {
+        container.innerHTML = `
+          <div class="space-y-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div class="flex items-center gap-3">
+                <button type="button" onclick="returnToLogOverview()" class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-brand-purple/20 bg-white text-brand-purple shadow-sm transition-transform duration-300 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/60" aria-label="Zurück zur Übersicht">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Historie</p>
+                  <h2 class="text-3xl font-semibold text-brand-ink">${escapeHtml(title)}</h2>
+                  <p class="text-sm text-slate-500">HEX ${escapeHtml(headingHex)}</p>
+                </div>
+              </div>
+              <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">14-Tage Historie</span>
+            </div>
+            ${createEmptyCard("Keine Historien-Daten vorhanden")}
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="returnToLogOverview()" class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-brand-purple/20 bg-white text-brand-purple shadow-sm transition-transform duration-300 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/60" aria-label="Zurück zur Übersicht">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+              </button>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Historie</p>
+                <h2 class="text-3xl font-semibold text-brand-ink">${escapeHtml(title)}</h2>
+                <p class="text-sm text-slate-500">HEX ${escapeHtml(headingHex)}</p>
+              </div>
+            </div>
+            <span class="rounded-full bg-brand-purple/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple">14-Tage Historie</span>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="rounded-2xl bg-brand-frost/80 px-4 py-3 shadow-inner shadow-white/40">
+              <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Zeitraum</p>
+              <p class="mt-1 text-lg font-semibold text-brand-ink">${escapeHtml(summaryDaysLabel)}</p>
+              <p class="text-xs text-slate-500">${escapeHtml(rangeLimitLabel)}</p>
+            </div>
+            <div class="rounded-2xl bg-brand-frost/80 px-4 py-3 shadow-inner shadow-white/40">
+              <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Einträge</p>
+              <p class="mt-1 text-lg font-semibold text-brand-ink">${escapeHtml(summaryEntriesLabel)}</p>
+              <p class="text-xs text-slate-500">${escapeHtml(limitNote)}</p>
+            </div>
+            <div class="rounded-2xl bg-brand-frost/80 px-4 py-3 shadow-inner shadow-white/40">
+              <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Letzte Aktualisierung</p>
+              <p class="mt-1 text-lg font-semibold text-brand-ink">${lastTimestampLabel}</p>
+              <p class="text-xs text-slate-500">Neueste Daten</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-500">
+            ${dayBadges || `<span class="rounded-full bg-slate-100 px-3 py-1 text-[0.65rem] font-semibold text-slate-400">Keine Tagesdaten</span>`}
+            ${extraBadge}
+          </div>
+          <div class="rounded-2xl border border-brand-purple/10 bg-white shadow-card">
+            <div class="border-b border-slate-100/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(limitNote)}</div>
             <div class="max-h-[70vh] overflow-auto">
               <table class="min-w-full divide-y divide-slate-100 text-left">
                 <thead class="sticky top-0 bg-brand-frost/90 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
@@ -1979,10 +2342,11 @@
 
     function returnToLogOverview() {
       activeLogHex = null;
+      cachedLogOverview = getLogOverviewCacheForSource(activeLogSource);
       if (Array.isArray(cachedLogOverview) && cachedLogOverview.length > 0) {
         renderLogOverview(cachedLogOverview);
       } else {
-        void loadLogOverview();
+        void loadLogOverview(activeLogSource);
       }
     }
 
@@ -2469,6 +2833,15 @@
                   Aktualisieren
                 </button>
               </div>
+              <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <div class="inline-flex items-center gap-2 rounded-3xl bg-white/70 p-1 shadow-inner shadow-white/50">
+                  <button type="button" data-log-source="live" onclick="switchLogSource('live')" class="log-source-toggle inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50">Live Log</button>
+                  <button type="button" data-log-source="history" onclick="switchLogSource('history')" class="log-source-toggle inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/50">
+                    <span>Historie</span>
+                    <span class="rounded-full bg-brand-purple/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-brand-purple">14-Tage Historie</span>
+                  </button>
+                </div>
+              </div>
               <div id="settingsLogsContainer" class="mt-6 space-y-4"></div>
             </section>
           </section>
@@ -2501,7 +2874,8 @@
       renderHexHistoryDropdown();
       handleHexInputChange();
       renderEventsManagementTable(currentEvents);
-      loadLogOverview();
+      updateLogSourceToggle();
+      loadLogOverview(activeLogSource);
       updateSettingsSectionVisibility();
     }
 

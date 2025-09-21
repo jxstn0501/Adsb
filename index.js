@@ -15,6 +15,8 @@ let events = [];          // Takeoff/Landing-Events
 let flightStatus = {};    // Status- & Verlaufdaten pro Flugzeug
 const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
+codex/add-history-log-endpoint-and-ui-features
+const logsHistoryDir = path.join(__dirname, "logs_history");
 const historyLogsDir = path.join(__dirname, "logs_history");
 const HISTORY_REQUEST_INTERVAL_MS = 2_000;
 const HISTORY_RATELIMIT_WAIT_MS = 30_000;
@@ -2080,6 +2082,490 @@ function readLogFile(filePath, { page = 1, limit = null } = {}) {
   });
 }
 
+function parseHistoryDateFromFileName(fileName) {
+  if (typeof fileName !== "string") {
+    return null;
+  }
+
+  const parsed = path.parse(fileName);
+  const baseName = parsed.name || fileName;
+  const match = baseName.match(/(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : baseName;
+}
+
+async function readHistoryFileRecords(filePath) {
+  let raw;
+  try {
+    raw = await fsp.readFile(filePath, "utf8");
+  } catch (err) {
+    throw new Error(`Datei konnte nicht gelesen werden: ${err.message}`);
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (parsed && typeof parsed === "object") {
+      return [parsed];
+    }
+  } catch (err) {
+    // Fallback auf JSONL
+  }
+
+  const lines = trimmed.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const records = [];
+  for (const line of lines) {
+    try {
+      records.push(JSON.parse(line));
+    } catch (err) {
+      console.warn("⚠️ Ungültiger History-Eintrag in", filePath, err.message);
+    }
+  }
+  return records;
+}
+
+async function loadHistoryDayDetail(hex, fileInfo, { includeRecords = false } = {}) {
+  if (!fileInfo || typeof fileInfo !== "object") {
+    return null;
+  }
+
+  const { fileName, filePath, date, stats } = fileInfo;
+  let fileStats = stats || null;
+  if (!fileStats) {
+    try {
+      fileStats = await fsp.stat(filePath);
+    } catch (err) {
+      console.warn("⚠️ History-Datei konnte nicht inspiziert werden:", filePath, err.message);
+      fileStats = null;
+    }
+  }
+
+  let records = [];
+  try {
+    records = await readHistoryFileRecords(filePath);
+  } catch (err) {
+    console.error("❌ Historie konnte nicht gelesen werden:", filePath, err.message);
+    records = [];
+  }
+
+  const recordCount = Array.isArray(records) ? records.length : 0;
+  const firstRecord = recordCount > 0 ? records[0] : null;
+  const lastRecord = recordCount > 0 ? records[recordCount - 1] : null;
+
+  const detail = {
+    hex,
+    date: date || parseHistoryDateFromFileName(fileName),
+    fileName,
+    fileSize: fileStats ? fileStats.size : null,
+    modified: fileStats && fileStats.mtime instanceof Date ? fileStats.mtime.toISOString() : null,
+    recordCount,
+    firstTimestamp: firstRecord && firstRecord.time ? firstRecord.time : null,
+    lastTimestamp: lastRecord && lastRecord.time ? lastRecord.time : null,
+    sampleFirstRecord: firstRecord && typeof firstRecord === "object" ? { ...firstRecord } : null,
+    sampleLastRecord: lastRecord && typeof lastRecord === "object" ? { ...lastRecord } : null
+  };
+
+  if (includeRecords) {
+    detail.records = records;
+  }
+
+  return detail;
+}
+
+async function listHistoryDays(hex, { includeRecords = false, limit = null } = {}) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    return [];
+  }
+
+  const directory = path.join(logsHistoryDir, normalizedHex);
+  let entries;
+  try {
+    entries = await fsp.readdir(directory, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return [];
+    }
+    throw err;
+  }
+
+  const files = await Promise.all(
+    entries
+      .filter(entry => entry && entry.isFile && entry.isFile())
+      .map(async entry => {
+        const filePath = path.join(directory, entry.name);
+        let stats = null;
+        try {
+          stats = await fsp.stat(filePath);
+        } catch (err) {
+          console.warn("⚠️ History-Datei konnte nicht gelesen werden:", filePath, err.message);
+          return null;
+        }
+        return {
+          fileName: entry.name,
+          filePath,
+          date: parseHistoryDateFromFileName(entry.name),
+          stats
+        };
+      })
+  );
+
+  const validFiles = files.filter(Boolean);
+
+  validFiles.sort((a, b) => {
+    if (a.date && b.date) {
+      const cmp = String(b.date).localeCompare(String(a.date));
+      if (cmp !== 0) {
+        return cmp;
+      }
+    }
+    const timeA = a.stats && a.stats.mtime instanceof Date ? a.stats.mtime.getTime() : 0;
+    const timeB = b.stats && b.stats.mtime instanceof Date ? b.stats.mtime.getTime() : 0;
+    return timeB - timeA;
+  });
+
+  const limitValue = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
+  const selectedFiles = limitValue ? validFiles.slice(0, limitValue) : validFiles;
+
+  const details = [];
+  for (const fileInfo of selectedFiles) {
+    const detail = await loadHistoryDayDetail(normalizedHex, fileInfo, { includeRecords });
+    if (detail) {
+      details.push(detail);
+    }
+  }
+
+  return details;
+}
+
+async function readHistoryDay(hex, date, { includeRecords = true } = {}) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex || !date) {
+    return null;
+  }
+
+  const directory = path.join(logsHistoryDir, normalizedHex);
+  let entries;
+  try {
+    entries = await fsp.readdir(directory, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+
+  const match = entries.find(entry => entry && entry.isFile && entry.isFile() && parseHistoryDateFromFileName(entry.name) === date);
+  if (!match) {
+    return null;
+  }
+
+  const filePath = path.join(directory, match.name);
+  let stats = null;
+  try {
+    stats = await fsp.stat(filePath);
+  } catch (err) {
+    console.warn("⚠️ History-Datei konnte nicht gelesen werden:", filePath, err.message);
+  }
+
+  return loadHistoryDayDetail(normalizedHex, { fileName: match.name, filePath, date, stats }, { includeRecords });
+}
+
+async function aggregateRecentHistory(hex, { limitDays = 14 } = {}) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    return { records: [], days: [] };
+  }
+
+  const safeLimit = Number.isFinite(limitDays) && limitDays > 0 ? Math.floor(limitDays) : 14;
+  const days = await listHistoryDays(normalizedHex, { includeRecords: true, limit: safeLimit });
+  if (days.length === 0) {
+    return { records: [], days: [] };
+  }
+
+  const records = [];
+  for (const day of days.slice().reverse()) {
+    if (Array.isArray(day.records)) {
+      for (const record of day.records) {
+        records.push(record);
+      }
+    }
+    delete day.records;
+  }
+
+  const sanitizedDays = days.map(day => {
+    const { records: _ignored, ...rest } = day;
+    return rest;
+  });
+
+  return { records, days: sanitizedDays };
+}
+
+function paginateArray(array, page = 1, limit = null) {
+  const total = Array.isArray(array) ? array.length : 0;
+  const hasLimit = Number.isFinite(limit) && limit > 0;
+  const safeLimit = hasLimit ? Math.floor(limit) : null;
+  const safePage = page > 0 ? Math.floor(page) : 1;
+  const startIndex = safeLimit ? (safePage - 1) * safeLimit : 0;
+  const endIndex = safeLimit ? startIndex + safeLimit : total;
+  const data = Array.isArray(array)
+    ? array.slice(startIndex, endIndex)
+    : [];
+  const totalPages = safeLimit ? Math.max(1, Math.ceil(total / safeLimit)) : (total > 0 ? 1 : 0);
+
+  return {
+    data,
+    total,
+    totalPages,
+    page: safePage,
+    limit: safeLimit
+  };
+}
+
+function streamJsonResponse(res, { headers = {}, objectFields = {}, arrayFieldName = "data", arrayItems = [] } = {}) {
+  const finalHeaders = { "Content-Type": "application/json", ...headers };
+  res.writeHead(200, finalHeaders);
+
+  res.write("{");
+  let wroteField = false;
+
+  const writeField = (key, value) => {
+    if (value === undefined) {
+      return;
+    }
+    if (wroteField) {
+      res.write(",");
+    }
+    res.write(JSON.stringify(key));
+    res.write(":");
+    res.write(JSON.stringify(value));
+    wroteField = true;
+  };
+
+  for (const [key, value] of Object.entries(objectFields)) {
+    if (key === arrayFieldName) {
+      continue;
+    }
+    writeField(key, value);
+  }
+
+  if (Array.isArray(arrayItems)) {
+    if (wroteField) {
+      res.write(",");
+    }
+    res.write(JSON.stringify(arrayFieldName));
+    res.write(":");
+    res.write("[");
+    arrayItems.forEach((item, index) => {
+      if (index > 0) {
+        res.write(",");
+      }
+      res.write(JSON.stringify(item));
+    });
+    res.write("]");
+    wroteField = true;
+  }
+
+  res.write("}");
+  res.end();
+}
+
+async function buildHistoryOverview() {
+  let entries;
+  try {
+    entries = await fsp.readdir(logsHistoryDir, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return [];
+    }
+    throw err;
+  }
+
+  const overview = [];
+
+  for (const entry of entries) {
+    if (!entry || !entry.isDirectory || !entry.isDirectory()) {
+      continue;
+    }
+
+    const hex = normalizeAircraftHex(entry.name);
+    if (!hex) {
+      continue;
+    }
+
+    let days;
+    try {
+      days = await listHistoryDays(hex);
+    } catch (err) {
+      console.warn("⚠️ Historie konnte nicht geladen werden für", hex, err.message);
+      continue;
+    }
+
+    if (!Array.isArray(days) || days.length === 0) {
+      continue;
+    }
+
+    const totalEntries = days.reduce((sum, day) => sum + (day.recordCount || 0), 0);
+    const latestDay = days[0];
+    const aircraftEntry = getAircraftByHex(hex);
+    const displayName = aircraftEntry && aircraftEntry.name
+      ? aircraftEntry.name
+      : (latestDay && latestDay.sampleLastRecord && latestDay.sampleLastRecord.callsign
+        ? latestDay.sampleLastRecord.callsign
+        : null);
+
+    overview.push({
+      hex,
+      name: displayName || null,
+      totalDays: days.length,
+      totalEntries,
+      lastDate: latestDay ? latestDay.date : null,
+      lastTimestamp: latestDay ? latestDay.lastTimestamp : null,
+      days: days.map(day => ({
+        date: day.date,
+        recordCount: day.recordCount,
+        firstTimestamp: day.firstTimestamp,
+        lastTimestamp: day.lastTimestamp,
+        fileName: day.fileName,
+        fileSize: day.fileSize
+      }))
+    });
+  }
+
+  overview.sort((a, b) => {
+    const timeA = Date.parse(a.lastTimestamp || a.lastDate || 0);
+    const timeB = Date.parse(b.lastTimestamp || b.lastDate || 0);
+    const aInvalid = Number.isNaN(timeA);
+    const bInvalid = Number.isNaN(timeB);
+
+    if (!aInvalid && !bInvalid && timeA !== timeB) {
+      return timeB - timeA;
+    }
+
+    if (aInvalid && !bInvalid) {
+      return 1;
+    }
+
+    if (!aInvalid && bInvalid) {
+      return -1;
+    }
+
+    return a.hex.localeCompare(b.hex);
+  });
+
+  return overview;
+}
+
+async function handleHistoryLogRequest(q, res) {
+  const hexParam = typeof q.query.hex === "string" ? q.query.hex : null;
+  const normalizedHex = hexParam ? normalizeAircraftHex(hexParam) : null;
+
+  if (!normalizedHex) {
+    const overview = await buildHistoryOverview();
+    if (!overview.length) {
+      sendError(res, 404, "Keine Historie vorhanden.");
+      return;
+    }
+    sendJSON(res, 200, overview);
+    return;
+  }
+
+  let daysMeta;
+  try {
+    daysMeta = await listHistoryDays(normalizedHex);
+  } catch (err) {
+    console.error("❌ Historie konnte nicht ermittelt werden für", normalizedHex, err.message);
+    sendError(res, 500, "Historie konnte nicht gelesen werden.");
+    return;
+  }
+
+  if (!Array.isArray(daysMeta) || daysMeta.length === 0) {
+    sendError(res, 404, "Keine Historie vorhanden.");
+    return;
+  }
+
+  const dateParamRaw = typeof q.query.date === "string" ? q.query.date.trim() : "";
+  const dateParam = dateParamRaw || null;
+  const hasPagination = typeof q.query.page !== "undefined" || typeof q.query.limit !== "undefined";
+  const page = hasPagination ? parsePositiveInt(q.query.page, 1) : 1;
+  const limit = hasPagination ? parsePositiveInt(q.query.limit, 100) : null;
+
+  if (dateParam) {
+    const detail = await readHistoryDay(normalizedHex, dateParam);
+    if (!detail) {
+      sendError(res, 404, "Keine Historie für dieses Datum.");
+      return;
+    }
+
+    const records = Array.isArray(detail.records) ? detail.records : [];
+    const pagination = paginateArray(records, page, limit);
+    const headers = hasPagination ? { "X-Total-Count": String(pagination.total) } : {};
+
+    const availableDays = daysMeta.map(day => ({
+      date: day.date,
+      recordCount: day.recordCount
+    }));
+
+    streamJsonResponse(res, {
+      headers,
+      objectFields: {
+        hex: normalizedHex,
+        date: detail.date,
+        page: pagination.page,
+        limit: pagination.limit,
+        total: pagination.total,
+        totalPages: pagination.totalPages,
+        firstTimestamp: detail.firstTimestamp,
+        lastTimestamp: detail.lastTimestamp,
+        availableDays
+      },
+      arrayFieldName: "data",
+      arrayItems: pagination.data
+    });
+    return;
+  }
+
+  const aggregated = await aggregateRecentHistory(normalizedHex, { limitDays: 14 });
+  const records = Array.isArray(aggregated.records) ? aggregated.records : [];
+  const pagination = paginateArray(records, page, limit);
+  const headers = hasPagination ? { "X-Total-Count": String(pagination.total) } : {};
+
+  const rangeDays = Array.isArray(aggregated.days)
+    ? aggregated.days.map(day => ({
+        date: day.date,
+        recordCount: day.recordCount,
+        firstTimestamp: day.firstTimestamp,
+        lastTimestamp: day.lastTimestamp,
+        fileName: day.fileName,
+        fileSize: day.fileSize
+      }))
+    : [];
+
+  streamJsonResponse(res, {
+    headers,
+    objectFields: {
+      hex: normalizedHex,
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
+      range: {
+        limitDays: 14,
+        totalDays: rangeDays.length,
+        days: rangeDays
+      }
+    },
+    arrayFieldName: "data",
+    arrayItems: pagination.data
+  });
+}
+
 // ===== Browser Start =====
 async function resolveChromiumExecutable() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -2317,6 +2803,11 @@ async function handleRequest(req, res) {
 
   if (q.pathname === "/latest") {
     sendJSON(res, 200, latestData);
+    return;
+  }
+
+  if (q.pathname === "/history-log") {
+    await handleHistoryLogRequest(q, res);
     return;
   }
 
