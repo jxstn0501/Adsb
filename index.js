@@ -15,7 +15,14 @@ let events = [];          // Takeoff/Landing-Events
 let flightStatus = {};    // Status- & Verlaufdaten pro Flugzeug
 const fsp = fs.promises;
 const logsDir = path.join(__dirname, "logs");
+codex/add-history-log-endpoint-and-ui-features
 const logsHistoryDir = path.join(__dirname, "logs_history");
+const historyLogsDir = path.join(__dirname, "logs_history");
+const HISTORY_REQUEST_INTERVAL_MS = 2_000;
+const HISTORY_RATELIMIT_WAIT_MS = 30_000;
+const historyDownloadsInFlight = new Set();
+const historyDownloadQueues = new Map();
+const historyExistingDaysCache = new Map();
 const logCounts = {};     // Zeilenanzahl pro Hex-Datei
 const lastLogRecords = {}; // Letzter Log-Eintrag pro Hex
 const placesPath = path.join(__dirname, "places.json");
@@ -44,6 +51,7 @@ const EMBEDDED_ASSETS = new Map([
 ]);
 
 const ADSB_BASE_URL = "https://globe.adsbexchange.com/?icao=";
+const ADSB_REFERER = "https://globe.adsbexchange.com/";
 const NAVIGATION_WAIT_UNTIL = "domcontentloaded";
 const NAVIGATION_TIMEOUT_MS = 60000;
 const PAGE_DEFAULT_TIMEOUT_MS = 60000;
@@ -888,9 +896,48 @@ function parseConfigPayload(payload) {
   };
 }
 
+async function initializeHistoryCache() {
+  historyExistingDaysCache.clear();
+
+  try {
+    const entries = await fsp.readdir(historyLogsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const normalizedHex = normalizeAircraftHex(entry.name);
+      if (!normalizedHex) {
+        continue;
+      }
+
+      const hexDirPath = path.join(historyLogsDir, entry.name);
+      const daySet = new Set();
+      try {
+        const files = await fsp.readdir(hexDirPath);
+        for (const file of files) {
+          if (file.toLowerCase().endsWith(".json")) {
+            daySet.add(path.basename(file, ".json"));
+          }
+        }
+      } catch (err) {
+        console.error(`⚠️ Verlaufseinträge konnten nicht gelesen werden (${entry.name}):`, err.message);
+      }
+
+      historyExistingDaysCache.set(normalizedHex, daySet);
+    }
+  } catch (err) {
+    if (err && err.code !== "ENOENT") {
+      console.error("⚠️ History-Verzeichnis konnte nicht gelesen werden:", err.message);
+    }
+  }
+}
+
 // ===== State loading =====
 async function initializeState() {
   await fsp.mkdir(logsDir, { recursive: true });
+  await fsp.mkdir(historyLogsDir, { recursive: true });
+  await initializeHistoryCache();
 
   try {
     const files = await fsp.readdir(logsDir);
@@ -1050,6 +1097,171 @@ function createSerialTaskQueue() {
 }
 
 const runWithPage = createSerialTaskQueue();
+
+// ===== History download support =====
+function delay(ms) {
+  const numeric = Number(ms);
+  const safeDelay = Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  return new Promise(resolve => setTimeout(resolve, safeDelay));
+}
+
+function formatDateForHistory(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function ensureHistoryDirectory(hex) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    throw new Error("Ungültiger Hex-Code für History-Verzeichnis.");
+  }
+
+  await fsp.mkdir(historyLogsDir, { recursive: true });
+  const hexDir = path.join(historyLogsDir, normalizedHex);
+  await fsp.mkdir(hexDir, { recursive: true });
+
+  let existingDays = historyExistingDaysCache.get(normalizedHex);
+  if (!existingDays) {
+    existingDays = new Set();
+    historyExistingDaysCache.set(normalizedHex, existingDays);
+    try {
+      const files = await fsp.readdir(hexDir);
+      for (const file of files) {
+        if (file.toLowerCase().endsWith(".json")) {
+          existingDays.add(path.basename(file, ".json"));
+        }
+      }
+    } catch (err) {
+      console.error("⚠️ Verlaufseinträge konnten nicht gelesen werden für", normalizedHex, err.message);
+    }
+  }
+
+  return { directory: hexDir, existingDays };
+}
+
+function buildHistoryUrl(hex, dateString) {
+  return `https://globe.adsbexchange.com/globe_history/data/${dateString}/traces/icao/${hex}_trace_full.json`;
+}
+
+async function downloadHistoryForHex(hex, days = 14) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    return;
+  }
+
+  let directoryInfo;
+  try {
+    directoryInfo = await ensureHistoryDirectory(normalizedHex);
+  } catch (err) {
+    console.error("⚠️ Verlaufverzeichnis konnte nicht vorbereitet werden für", normalizedHex, err.message);
+    return;
+  }
+
+  const { directory, existingDays } = directoryInfo;
+  const now = new Date();
+
+  for (let offset = 0; offset < days; offset++) {
+    const targetDate = new Date(now);
+    targetDate.setUTCDate(targetDate.getUTCDate() - (offset + 1));
+    const dateString = formatDateForHistory(targetDate);
+    const fileName = `${dateString}.json`;
+    const filePath = path.join(directory, fileName);
+
+    if (!existingDays.has(dateString)) {
+      try {
+        await fsp.access(filePath, fs.constants.F_OK);
+        existingDays.add(dateString);
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          console.error(`⚠️ Verlauf-Datei konnte nicht überprüft werden (${normalizedHex} ${dateString}):`, err.message);
+        }
+      }
+    }
+
+    if (existingDays.has(dateString)) {
+      continue;
+    }
+
+    const historyUrl = buildHistoryUrl(normalizedHex, dateString);
+    let performedRequestForDay = false;
+
+    while (true) {
+      let response;
+      try {
+        response = await fetch(historyUrl, {
+          headers: { Referer: ADSB_REFERER }
+        });
+        performedRequestForDay = true;
+      } catch (err) {
+        console.error(`⚠️ Verlauf-Download fehlgeschlagen (${normalizedHex} ${dateString}):`, err.message);
+        break;
+      }
+
+      if (response.status === 429) {
+        console.warn(`⚠️ Verlauf-Download rate-limitiert (${normalizedHex} ${dateString}). Warte ${HISTORY_RATELIMIT_WAIT_MS} ms.`);
+        await delay(HISTORY_RATELIMIT_WAIT_MS);
+        continue;
+      }
+
+      if (response.status === 200) {
+        try {
+          const body = await response.text();
+          await fsp.writeFile(filePath, body, "utf8");
+          existingDays.add(dateString);
+          console.log(`💾 Verlauf gespeichert für ${normalizedHex} (${dateString}).`);
+        } catch (err) {
+          console.error(`❌ Verlauf-Datei konnte nicht gespeichert werden (${normalizedHex} ${dateString}):`, err.message);
+        }
+      } else {
+        console.warn(`⚠️ Verlauf-Download für ${normalizedHex} (${dateString}) mit Status ${response.status}.`);
+      }
+
+      break;
+    }
+
+    if (offset < days - 1 && performedRequestForDay) {
+      await delay(HISTORY_REQUEST_INTERVAL_MS);
+    }
+  }
+}
+
+function getHistoryDownloadQueue(hex) {
+  let queue = historyDownloadQueues.get(hex);
+  if (!queue) {
+    queue = createSerialTaskQueue();
+    historyDownloadQueues.set(hex, queue);
+  }
+  return queue;
+}
+
+function queueHistoryDownload(hex) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    return;
+  }
+
+  if (historyDownloadsInFlight.has(normalizedHex)) {
+    return;
+  }
+
+  const queue = getHistoryDownloadQueue(normalizedHex);
+  historyDownloadsInFlight.add(normalizedHex);
+
+  queue(async () => {
+    try {
+      await downloadHistoryForHex(normalizedHex);
+    } catch (err) {
+      console.error(`⚠️ Verlauf konnte nicht heruntergeladen werden für ${normalizedHex}:`, err.message);
+    } finally {
+      historyDownloadsInFlight.delete(normalizedHex);
+    }
+  }).catch(err => {
+    historyDownloadsInFlight.delete(normalizedHex);
+    console.error(`⚠️ Verlauf-Warteschlange schlug fehl für ${normalizedHex}:`, err.message);
+  });
+}
 
 function getTargetUrl(hexValue = targetHex) {
   const fallback = typeof targetHex === "string" && targetHex.trim()
@@ -2564,6 +2776,7 @@ async function handleSetRequest(res, hexParam) {
     } else {
       startScrapeLoop();
     }
+    queueHistoryDownload(targetHex);
     console.log("🎯 Navigiere zu neuem Ziel:", targetHex);
     const responsePayload = { success: true, hex: targetHex };
     if (aircraftName) {
