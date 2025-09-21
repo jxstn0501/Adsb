@@ -5,5 +5,6 @@
   "placeMatchRadiusMeters": 500,
   "notificationsEnabled": false,
   "notifyOnTakeoff": true,
-  "notifyOnLanding": true
+  "notifyOnLanding": true,
+  "adsbHistoryAuthHeader": ""
 }
