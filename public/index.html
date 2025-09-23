@@ -236,7 +236,11 @@
     let activeLogSource = LOG_SOURCE_LIVE;
     let activeLogHex = null;
     let activeSettingsSection = "aircraft";
-    let eventDetailReturnState = { mode: "overview", groupKey: null };
+    const EVENTS_VIEW_OVERVIEW = "overview";
+    const EVENTS_VIEW_GROUP = "group";
+    const EVENTS_VIEW_DETAIL = "detail";
+
+    let eventDetailReturnState = { mode: EVENTS_VIEW_OVERVIEW, groupKey: null };
     let eventsOverviewScrollTop = 0;
     const eventGroupScrollPositions = new Map();
     const EVENT_STREAM_RETRY_MS = 5000;
@@ -1088,8 +1092,10 @@
       currentEventGroups = groupEventsByAircraft(currentEvents);
 
       if (activeView === "events") {
-        if (eventDetailReturnState.mode === "detail") {
+        if (eventDetailReturnState.mode === EVENTS_VIEW_GROUP) {
           renderEventsDetail();
+        } else if (eventDetailReturnState.mode === EVENTS_VIEW_DETAIL) {
+          renderEventDetail(activeEventDetail, eventDetailReturnState.groupKey || null);
         } else {
           renderEventsOverview();
         }
@@ -1172,13 +1178,13 @@
         resolvedGroupKey = activeEventGroupKey;
       }
 
-      if (resolvedGroupKey) {
-        eventDetailReturnState = { mode: "group", groupKey: resolvedGroupKey };
-      } else {
-        eventDetailReturnState = { mode: "overview", groupKey: null };
-      }
+      const normalizedGroupKey = typeof resolvedGroupKey === "string" && resolvedGroupKey
+        ? resolvedGroupKey
+        : null;
 
-      renderEventDetail(payload);
+      eventDetailReturnState = { mode: EVENTS_VIEW_DETAIL, groupKey: normalizedGroupKey };
+
+      renderEventDetail(payload, normalizedGroupKey);
     }
 
     function openEventDetailFromNotification(payload, groupKey = "") {
@@ -1279,7 +1285,7 @@
       }, 5000);
     }
 
-    function renderEventDetail(event) {
+    function renderEventDetail(event, groupKey = null) {
       stopSettingsInterval();
       setActiveView("events");
       closeSidebar();
@@ -1290,13 +1296,25 @@
       const target = document.getElementById("content");
       if (!target) return;
       if (target.dataset) {
-        if (target.dataset.eventsView === "overview") {
+        if (target.dataset.eventsView === EVENTS_VIEW_OVERVIEW) {
           eventsOverviewScrollTop = target.scrollTop || 0;
-        } else if (target.dataset.eventsView === "group" && activeEventGroupKey) {
+        } else if (target.dataset.eventsView === EVENTS_VIEW_GROUP && activeEventGroupKey) {
           eventGroupScrollPositions.set(activeEventGroupKey, target.scrollTop || 0);
         }
-        target.dataset.eventsView = "detail";
+        target.dataset.eventsView = EVENTS_VIEW_DETAIL;
       }
+
+      const normalizedGroupKey = typeof groupKey === "string" && groupKey
+        ? groupKey
+        : (typeof eventDetailReturnState.groupKey === "string" && eventDetailReturnState.groupKey
+          ? eventDetailReturnState.groupKey
+          : null);
+
+      if (normalizedGroupKey) {
+        activeEventGroupKey = normalizedGroupKey;
+      }
+
+      eventDetailReturnState = { mode: EVENTS_VIEW_DETAIL, groupKey: normalizedGroupKey };
 
       const normalizedEvent = cloneEventForNotification(event);
       if (!normalizedEvent) {
@@ -1411,6 +1429,9 @@
         </section>`;
 
       target.scrollTop = 0;
+      requestAnimationFrame(() => {
+        target.scrollTop = 0;
+      });
 
       if (showDebugButton) {
         const debugButton = document.getElementById("eventDebugTrigger");
@@ -1534,7 +1555,7 @@
       cleanupEventMap();
       cancelDebugNotificationTimer();
       activeEventDetail = null;
-      eventDetailReturnState = { mode: "overview", groupKey: null };
+      eventDetailReturnState = { mode: EVENTS_VIEW_OVERVIEW, groupKey: null };
 
       const container = document.getElementById("content");
       if (!container) return;
@@ -1564,7 +1585,7 @@
 
         currentEventGroups = groupEventsByAircraft(events);
         activeEventGroupKey = null;
-        eventDetailReturnState = { mode: "overview", groupKey: null };
+        eventDetailReturnState = { mode: EVENTS_VIEW_OVERVIEW, groupKey: null };
         renderEventsOverview();
       } catch (err) {
         console.error("[Events] Liste konnte nicht geladen werden:", err);
@@ -1622,14 +1643,14 @@
       const container = document.getElementById("content");
       if (!container) return;
       if (container.dataset) {
-        if (container.dataset.eventsView === "overview") {
+        if (container.dataset.eventsView === EVENTS_VIEW_OVERVIEW) {
           eventsOverviewScrollTop = container.scrollTop || 0;
-        } else if (container.dataset.eventsView === "group" && activeEventGroupKey) {
+        } else if (container.dataset.eventsView === EVENTS_VIEW_GROUP && activeEventGroupKey) {
           eventGroupScrollPositions.set(activeEventGroupKey, container.scrollTop || 0);
         }
-        container.dataset.eventsView = "overview";
+        container.dataset.eventsView = EVENTS_VIEW_OVERVIEW;
       }
-      eventDetailReturnState = { mode: "overview", groupKey: null };
+      eventDetailReturnState = { mode: EVENTS_VIEW_OVERVIEW, groupKey: null };
 
       if (!Array.isArray(currentEventGroups) || currentEventGroups.length === 0) {
         container.innerHTML = `
@@ -1749,15 +1770,15 @@
 
       const container = document.getElementById("content");
       if (container && container.dataset) {
-        if (container.dataset.eventsView === "overview") {
+        if (container.dataset.eventsView === EVENTS_VIEW_OVERVIEW) {
           eventsOverviewScrollTop = container.scrollTop || 0;
-        } else if (container.dataset.eventsView === "group" && activeEventGroupKey) {
+        } else if (container.dataset.eventsView === EVENTS_VIEW_GROUP && activeEventGroupKey) {
           eventGroupScrollPositions.set(activeEventGroupKey, container.scrollTop || 0);
         }
       }
 
       activeEventGroupKey = key;
-      eventDetailReturnState = { mode: "group", groupKey: key };
+      eventDetailReturnState = { mode: EVENTS_VIEW_GROUP, groupKey: key };
       renderEventsDetail();
     }
 
@@ -1767,7 +1788,7 @@
         eventGroupScrollPositions.set(activeEventGroupKey, container.scrollTop || 0);
       }
       activeEventGroupKey = null;
-      eventDetailReturnState = { mode: "overview", groupKey: null };
+      eventDetailReturnState = { mode: EVENTS_VIEW_OVERVIEW, groupKey: null };
       renderEventsOverview();
     }
 
@@ -1775,12 +1796,12 @@
       const container = document.getElementById("content");
       if (!container) return;
       if (container.dataset) {
-        if (container.dataset.eventsView === "overview") {
+        if (container.dataset.eventsView === EVENTS_VIEW_OVERVIEW) {
           eventsOverviewScrollTop = container.scrollTop || 0;
-        } else if (container.dataset.eventsView === "group" && activeEventGroupKey) {
+        } else if (container.dataset.eventsView === EVENTS_VIEW_GROUP && activeEventGroupKey) {
           eventGroupScrollPositions.set(activeEventGroupKey, container.scrollTop || 0);
         }
-        container.dataset.eventsView = "group";
+        container.dataset.eventsView = EVENTS_VIEW_GROUP;
       }
 
       const group = Array.isArray(currentEventGroups)
@@ -1798,7 +1819,7 @@
         return;
       }
 
-      eventDetailReturnState = { mode: "group", groupKey: group.key };
+      eventDetailReturnState = { mode: EVENTS_VIEW_GROUP, groupKey: group.key };
 
       const events = getSortedEventsForGroup(group.events);
       const displayName = getAircraftDisplayName(group.hex, group.callsign || group.hex || "");
@@ -1849,11 +1870,14 @@
     function handleEventDetailBack() {
       cancelDebugNotificationTimer();
       activeEventDetail = null;
-      const targetKey = eventDetailReturnState && eventDetailReturnState.mode === "group"
+      const targetKey = typeof eventDetailReturnState?.groupKey === "string" && eventDetailReturnState.groupKey
         ? eventDetailReturnState.groupKey
         : null;
+      const canReturnToGroup = !!targetKey
+        && eventDetailReturnState
+        && (eventDetailReturnState.mode === EVENTS_VIEW_DETAIL || eventDetailReturnState.mode === EVENTS_VIEW_GROUP);
 
-      if (targetKey && Array.isArray(currentEventGroups)) {
+      if (canReturnToGroup && Array.isArray(currentEventGroups)) {
         const exists = currentEventGroups.some(entry => entry && entry.key === targetKey);
         if (exists) {
           activeEventGroupKey = targetKey;
@@ -3354,7 +3378,7 @@
       saveNotificationDebugMode(notificationDebugMode);
 
       if (activeView === "events" && activeEventDetail) {
-        renderEventDetail(activeEventDetail);
+        renderEventDetail(activeEventDetail, eventDetailReturnState.groupKey || null);
       }
     }
 
