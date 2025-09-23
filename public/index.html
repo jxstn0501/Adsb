@@ -89,6 +89,14 @@
       }
     }
   </style>
+  <script>
+    const ensureTopOnLoad = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    };
+
+    window.addEventListener("DOMContentLoaded", ensureTopOnLoad);
+    window.addEventListener("pageshow", ensureTopOnLoad);
+  </script>
 </head>
 <body class="min-h-screen bg-brand-frost font-sans text-brand-ink antialiased">
   <div class="flex min-h-[100dvh] flex-col">
