@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-23T20:07:05.577Z",
+  "time": "2025-09-23T20:07:10.945Z",
   "hex": "4ca9cf",
-  "callsign": "RYR83SD",
-  "reg": "EI-EVG",
-  "type": "B738",
-  "gs": 417,
-  "alt": 29300,
-  "vr": -1664,
-  "hdg": 261,
-  "lat": 51.997,
-  "lon": 3.199,
-  "lastSeen": 0
+  "callsign": "no callsign",
+  "reg": "n/a",
+  "type": "n/a",
+  "gs": null,
+  "alt": null,
+  "vr": null,
+  "hdg": null,
+  "lat": null,
+  "lon": null,
+  "lastSeen": null
 }
