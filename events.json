@@ -11,7 +11,17 @@
     "lastSeen": 4,
     "id": "1",
     "place": {
-      "type": "external"
+      "name": "Prützmannshagen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Prützmannshagen, Süderholz, Vorpommern-Rügen, Mecklenburg-Vorpommern, Deutschland",
+      "lat": 54.091,
+      "lon": 13.145,
+      "city": "Süderholz",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "290176520",
+      "osmType": "node"
     }
   },
   {
@@ -26,7 +36,17 @@
     "lastSeen": 85,
     "id": "2",
     "place": {
-      "type": "external"
+      "name": "Behnkenhagen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Behnkenhagen, Süderholz, Vorpommern-Rügen, Mecklenburg-Vorpommern, 18516, Deutschland",
+      "lat": 54.09,
+      "lon": 13.179,
+      "city": "Süderholz",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "293398262",
+      "osmType": "node"
     }
   },
   {
@@ -41,7 +61,17 @@
     "lastSeen": 8,
     "id": "3",
     "place": {
-      "type": "external"
+      "name": "Behnkenhagen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Behnkenhagen, Süderholz, Vorpommern-Rügen, Mecklenburg-Vorpommern, 18516, Deutschland",
+      "lat": 54.09,
+      "lon": 13.179,
+      "city": "Süderholz",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "293398262",
+      "osmType": "node"
     }
   },
   {
@@ -56,7 +86,17 @@
     "lastSeen": 62,
     "id": "4",
     "place": {
-      "type": "external"
+      "name": "Kreutzmannshagen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Kreutzmannshagen, Süderholz, Vorpommern-Rügen, Mecklenburg-Vorpommern, 18516, Deutschland",
+      "lat": 54.089,
+      "lon": 13.213,
+      "city": "Süderholz",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "290176521",
+      "osmType": "node"
     }
   },
   {
@@ -71,7 +111,17 @@
     "lastSeen": 8,
     "id": "5",
     "place": {
-      "type": "external"
+      "name": "Kreutzmannshagen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Kreutzmannshagen, Süderholz, Vorpommern-Rügen, Mecklenburg-Vorpommern, 18516, Deutschland",
+      "lat": 54.089,
+      "lon": 13.225,
+      "city": "Süderholz",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "290176521",
+      "osmType": "node"
     }
   },
   {
@@ -86,7 +136,17 @@
     "lastSeen": 51,
     "id": "6",
     "place": {
-      "type": "external"
+      "name": "Dreizehnhausen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Dreizehnhausen, Süderholz, Vorpommern-Rügen, Mecklenburg-Vorpommern, Deutschland",
+      "lat": 54.088,
+      "lon": 13.253,
+      "city": "Süderholz",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "4513699112",
+      "osmType": "node"
     }
   },
   {
@@ -101,7 +161,17 @@
     "lastSeen": 2,
     "id": "7",
     "place": {
-      "type": "external"
+      "name": "Levenhagen Hof 2",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Levenhagen Hof 2, Levenhagen, Landhagen, Vorpommern-Greifswald, Mecklenburg-Vorpommern, 17498, Deutschland",
+      "lat": 54.088,
+      "lon": 13.266,
+      "city": "Levenhagen",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "4513693521",
+      "osmType": "node"
     }
   },
   {
@@ -116,7 +186,17 @@
     "lastSeen": 79,
     "id": "8",
     "place": {
-      "type": "external"
+      "name": "Fettenvorstadt",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Fettenvorstadt, Greifswald, Vorpommern-Greifswald, Mecklenburg-Vorpommern, 17498, Deutschland",
+      "lat": 54.085,
+      "lon": 13.337,
+      "city": "Greifswald",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "3686992",
+      "osmType": "relation"
     }
   },
   {
@@ -131,7 +211,17 @@
     "lastSeen": 4,
     "id": "9",
     "place": {
-      "type": "external"
+      "name": "Fettenvorstadt",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Fettenvorstadt, Greifswald, Vorpommern-Greifswald, Mecklenburg-Vorpommern, 17498, Deutschland",
+      "lat": 54.084,
+      "lon": 13.348,
+      "city": "Greifswald",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "3686992",
+      "osmType": "relation"
     }
   },
   {
@@ -149,6 +239,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -168,6 +259,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -187,6 +279,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -206,6 +299,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -225,6 +319,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -241,7 +336,17 @@
     "lastSeen": 63,
     "id": "18",
     "place": {
-      "type": "external"
+      "name": "Mahn- und Gedenkstätte Fünfeichen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Mahn- und Gedenkstätte Fünfeichen, Fünfeichen, Neubrandenburg, Mecklenburgische Seenplatte, Mecklenburg-Vorpommern, 17033, Deutschland",
+      "lat": 53.545,
+      "lon": 13.291,
+      "city": "Neubrandenburg",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "4521491317",
+      "osmType": "node"
     }
   },
   {
@@ -256,7 +361,17 @@
     "lastSeen": 0,
     "id": "19",
     "place": {
-      "type": "external"
+      "name": "Mahn- und Gedenkstätte Fünfeichen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Mahn- und Gedenkstätte Fünfeichen, Fünfeichen, Neubrandenburg, Mecklenburgische Seenplatte, Mecklenburg-Vorpommern, 17033, Deutschland",
+      "lat": 53.545,
+      "lon": 13.291,
+      "city": "Neubrandenburg",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "4521491317",
+      "osmType": "node"
     }
   },
   {
@@ -274,6 +389,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -293,6 +409,7 @@
       "id": "mfqxpgb7",
       "name": "HGW Uni",
       "type": "Base",
+      "source": "user",
       "lat": 54.089087,
       "lon": 13.408101
     }
@@ -309,7 +426,17 @@
     "lastSeen": 0,
     "id": "22",
     "place": {
-      "type": "external"
+      "name": "Pielice Kolonia",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Pielice Kolonia, Pehlitz, gmina Strzelce Krajeńskie, Strzelce-Drezdenko County, Woiwodschaft Lebus, 66-510, Polen",
+      "lat": 52.95,
+      "lon": 15.577,
+      "city": "Pehlitz",
+      "country": "Polen",
+      "state": "Woiwodschaft Lebus",
+      "osmId": "692619995",
+      "osmType": "node"
     }
   }
 ]
