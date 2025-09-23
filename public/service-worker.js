@@ -85,20 +85,57 @@ self.addEventListener('fetch', event => {
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const targetUrl = (event.notification && event.notification.data && event.notification.data.url) || '/';
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
-      for (const client of clientList) {
-        if (client.url.includes(targetUrl) && 'focus' in client) {
-          return client.focus();
+
+  const data = (event.notification && event.notification.data) || {};
+  const targetUrl = typeof data.url === 'string' && data.url ? data.url : '/';
+  const eventPayload = data.event || null;
+  const groupKey = data.groupKey || null;
+
+  event.waitUntil((async () => {
+    try {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      let matchedClient = null;
+      const target = new URL(targetUrl, self.location.origin);
+
+      for (const client of clients) {
+        try {
+          const clientUrl = new URL(client.url, self.location.origin);
+          if (clientUrl.origin === target.origin) {
+            matchedClient = client;
+            break;
+          }
+        } catch (err) {
+          // ignore parsing errors for client URLs
         }
       }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+
+      if (matchedClient) {
+        if ('focus' in matchedClient) {
+          await matchedClient.focus();
+        }
+        if (eventPayload) {
+          matchedClient.postMessage({ type: 'open-event', event: eventPayload, groupKey, url: targetUrl });
+        }
+        return;
       }
-      return null;
-    })
-  );
+
+      if (self.clients.openWindow) {
+        const opened = await self.clients.openWindow(targetUrl);
+        if (opened && eventPayload) {
+          opened.postMessage({ type: 'open-event', event: eventPayload, groupKey, url: targetUrl });
+        }
+      }
+    } catch (err) {
+      console.warn('notificationclick handler failed', err);
+      if (self.clients && self.clients.openWindow) {
+        try {
+          await self.clients.openWindow(targetUrl);
+        } catch (openErr) {
+          console.warn('fallback openWindow failed', openErr);
+        }
+      }
+    }
+  })());
 });
 
 self.addEventListener('push', event => {

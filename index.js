@@ -64,6 +64,14 @@ let consecutiveTimeoutCount = 0;
 
 const DEFAULT_PLACE_MATCH_RADIUS_METERS = 500;
 
+const OSM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
+const OSM_REVERSE_CACHE = new Map();
+const OSM_CACHE_MAX_SIZE = 500;
+const OSM_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 Stunden
+const OSM_CACHE_COORD_PRECISION = 3;
+const OSM_DEFAULT_LANGUAGE = "de,en";
+const OSM_USER_AGENT = "HeliTracker/1.0 (+https://helitracker.local)";
+
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
@@ -309,6 +317,23 @@ async function upsertAircraft(hex, name) {
   return getAircraftByHex(normalizedHex);
 }
 
+async function deleteAircraft(hex) {
+  const normalizedHex = normalizeAircraftHex(hex);
+  if (!normalizedHex) {
+    throw new Error("Ungültiger Hex-Code.");
+  }
+
+  const current = getAircraftList();
+  const filtered = current.filter(entry => normalizeAircraftHex(entry && entry.hex) !== normalizedHex);
+
+  if (filtered.length === current.length) {
+    return false;
+  }
+
+  await saveAircraft(filtered);
+  return true;
+}
+
 function startAircraftWatcher() {
   try {
     fs.watchFile(aircraftPath, { interval: 1000 }, () => {
@@ -529,6 +554,14 @@ function normalizeEventPlace(placeInfo) {
     snapshot.type = placeInfo.type;
   }
 
+  if (placeInfo.source !== undefined) {
+    snapshot.source = placeInfo.source;
+  }
+
+  if (placeInfo.displayName !== undefined) {
+    snapshot.displayName = placeInfo.displayName;
+  }
+
   const lat = toFiniteNumber(placeInfo.lat);
   if (lat !== null) {
     snapshot.lat = lat;
@@ -543,7 +576,234 @@ function normalizeEventPlace(placeInfo) {
     snapshot.city = placeInfo.city;
   }
 
+  if (placeInfo.country !== undefined) {
+    snapshot.country = placeInfo.country;
+  }
+
+  if (placeInfo.state !== undefined) {
+    snapshot.state = placeInfo.state;
+  }
+
+  if (placeInfo.osmId !== undefined && placeInfo.osmId !== null) {
+    snapshot.osmId = String(placeInfo.osmId);
+  }
+
+  if (placeInfo.osmType !== undefined) {
+    snapshot.osmType = placeInfo.osmType;
+  }
+
   return snapshot;
+}
+
+// ===== OSM helpers =====
+function sanitizeOsmString(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : "";
+}
+
+function pickFirstNonEmpty(values) {
+  for (const candidate of values) {
+    const text = sanitizeOsmString(candidate);
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function buildOsmCacheKey(lat, lon) {
+  const latNum = toFiniteNumber(lat);
+  const lonNum = toFiniteNumber(lon);
+  if (latNum === null || lonNum === null) {
+    return null;
+  }
+  return `${latNum.toFixed(OSM_CACHE_COORD_PRECISION)},${lonNum.toFixed(OSM_CACHE_COORD_PRECISION)}`;
+}
+
+function getCachedOsmPlace(key) {
+  if (!key || !OSM_REVERSE_CACHE.has(key)) {
+    return undefined;
+  }
+
+  const entry = OSM_REVERSE_CACHE.get(key);
+  if (!entry || (entry.expiresAt && entry.expiresAt <= Date.now())) {
+    OSM_REVERSE_CACHE.delete(key);
+    return undefined;
+  }
+
+  if (!entry.place) {
+    return null;
+  }
+
+  return { ...entry.place };
+}
+
+function setCachedOsmPlace(key, place) {
+  if (!key) {
+    return;
+  }
+
+  OSM_REVERSE_CACHE.set(key, {
+    place: place ? { ...place } : null,
+    expiresAt: Date.now() + OSM_CACHE_TTL_MS
+  });
+
+  if (OSM_REVERSE_CACHE.size > OSM_CACHE_MAX_SIZE) {
+    const oldestKey = OSM_REVERSE_CACHE.keys().next().value;
+    if (oldestKey !== undefined) {
+      OSM_REVERSE_CACHE.delete(oldestKey);
+    }
+  }
+}
+
+function normalizeOsmPlaceResponse(data, lat, lon) {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const address = data.address && typeof data.address === "object" ? data.address : {};
+
+  const name = pickFirstNonEmpty([
+    data.name,
+    address.amenity,
+    address.building,
+    address.leisure,
+    address.tourism,
+    address.shop,
+    address.office,
+    address.hospital,
+    address.university,
+    address.school,
+    address.college,
+    address.library,
+    address.museum,
+    address.theatre,
+    address.attraction,
+    address.aeroway,
+    address.airport,
+    address.helipad,
+    address.bus_station,
+    address.train_station,
+    address.suburb,
+    address.neighbourhood,
+    address.quarter,
+    address.road,
+    address.village,
+    address.town
+  ]);
+
+  const city = pickFirstNonEmpty([
+    address.city,
+    address.town,
+    address.village,
+    address.municipality,
+    address.county,
+    address.state
+  ]);
+
+  const displayName = sanitizeOsmString(data.display_name);
+  const country = pickFirstNonEmpty([address.country]);
+  const state = pickFirstNonEmpty([address.state]);
+
+  if (!name && !city && !displayName) {
+    return null;
+  }
+
+  const latNum = toFiniteNumber(lat);
+  const lonNum = toFiniteNumber(lon);
+
+  const place = { type: "external", source: "osm" };
+
+  if (latNum !== null) {
+    place.lat = latNum;
+  }
+
+  if (lonNum !== null) {
+    place.lon = lonNum;
+  }
+
+  if (name) {
+    place.name = name;
+  }
+
+  if (city && (!name || city.toLowerCase() !== name.toLowerCase())) {
+    place.city = city;
+  }
+
+  if (country) {
+    place.country = country;
+  }
+
+  if (state && (!place.state || place.state.toLowerCase() !== state.toLowerCase())) {
+    place.state = state;
+  }
+
+  if (displayName) {
+    place.displayName = displayName;
+  }
+
+  if (data.osm_id !== undefined && data.osm_id !== null) {
+    place.osmId = String(data.osm_id);
+  }
+
+  const osmType = sanitizeOsmString(data.osm_type);
+  if (osmType) {
+    place.osmType = osmType;
+  }
+
+  return place;
+}
+
+async function fetchNearestOsmPlace(lat, lon) {
+  const key = buildOsmCacheKey(lat, lon);
+  if (!key) {
+    return null;
+  }
+
+  const cached = getCachedOsmPlace(key);
+  if (cached !== undefined) {
+    return cached ? { ...cached } : null;
+  }
+
+  const latNum = toFiniteNumber(lat);
+  const lonNum = toFiniteNumber(lon);
+  if (latNum === null || lonNum === null) {
+    setCachedOsmPlace(key, null);
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    format: "jsonv2",
+    lat: String(latNum),
+    lon: String(lonNum),
+    zoom: "15",
+    addressdetails: "1"
+  });
+
+  try {
+    const response = await fetch(`${OSM_REVERSE_URL}?${params.toString()}`, {
+      headers: {
+        "User-Agent": OSM_USER_AGENT,
+        "Accept-Language": OSM_DEFAULT_LANGUAGE
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const place = normalizeOsmPlaceResponse(data, latNum, lonNum);
+    setCachedOsmPlace(key, place);
+    return place ? { ...place } : null;
+  } catch (err) {
+    console.warn("⚠️ OpenStreetMap Reverse Lookup fehlgeschlagen:", err.message);
+    setCachedOsmPlace(key, null);
+    return null;
+  }
 }
 
 async function persistEvents() {
@@ -781,7 +1041,7 @@ async function recalculateEventPlacesForAllEvents() {
         continue;
       }
 
-      const candidatePlace = determinePlaceForRecord(event);
+      const candidatePlace = await determinePlaceForRecord(event);
       const candidateSnapshot = normalizeEventPlaceSnapshot(candidatePlace);
       const existingSnapshot = Object.prototype.hasOwnProperty.call(event, "place")
         ? normalizeEventPlaceSnapshot(event.place)
@@ -1699,7 +1959,7 @@ function getEffectiveRadiusMetersForPlace(place) {
   return getPlaceMatchRadiusMeters();
 }
 
-function determinePlaceForRecord(record) {
+async function determinePlaceForRecord(record) {
   if (!record || typeof record !== "object") {
     return { type: "external" };
   }
@@ -1712,56 +1972,64 @@ function determinePlaceForRecord(record) {
   }
 
   const list = getPlaces();
-  if (!Array.isArray(list) || list.length === 0) {
-    return { type: "external" };
+  if (Array.isArray(list) && list.length > 0) {
+    let nearest = null;
+    let nearestDistance = Infinity;
+
+    for (const place of list) {
+      if (!place || typeof place !== "object") {
+        continue;
+      }
+
+      const placeLat = toFiniteNumber(place.lat);
+      const placeLon = toFiniteNumber(place.lon);
+
+      if (placeLat === null || placeLon === null) {
+        continue;
+      }
+
+      const distance = haversine(lat, lon, placeLat, placeLon);
+      if (!Number.isFinite(distance)) {
+        continue;
+      }
+
+      const effectiveRadius = getEffectiveRadiusMetersForPlace(place);
+      if (distance <= effectiveRadius && distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = { place, lat: placeLat, lon: placeLon };
+      }
+    }
+
+    if (nearest) {
+      const { place, lat: placeLat, lon: placeLon } = nearest;
+      const name =
+        typeof place.name === "string" && place.name.trim()
+          ? place.name.trim()
+          : (typeof place.id !== "undefined" ? String(place.id) : "Unbenannter Ort");
+      const type =
+        typeof place.type === "string" && place.type.trim()
+          ? place.type
+          : "unknown";
+
+      const snapshot = { name, lat: placeLat, lon: placeLon, type, source: "user" };
+      if (place.id !== undefined && place.id !== null) {
+        snapshot.id = String(place.id);
+      }
+      if (place.city !== undefined) {
+        snapshot.city = place.city;
+      }
+      if (place.country !== undefined) {
+        snapshot.country = place.country;
+      }
+      if (place.state !== undefined) {
+        snapshot.state = place.state;
+      }
+      return snapshot;
+    }
   }
 
-  let nearest = null;
-  let nearestDistance = Infinity;
-
-  for (const place of list) {
-    if (!place || typeof place !== "object") {
-      continue;
-    }
-
-    const placeLat = toFiniteNumber(place.lat);
-    const placeLon = toFiniteNumber(place.lon);
-
-    if (placeLat === null || placeLon === null) {
-      continue;
-    }
-
-    const distance = haversine(lat, lon, placeLat, placeLon);
-    if (!Number.isFinite(distance)) {
-      continue;
-    }
-
-    const effectiveRadius = getEffectiveRadiusMetersForPlace(place);
-    if (distance <= effectiveRadius && distance < nearestDistance) {
-      nearestDistance = distance;
-      nearest = { place, lat: placeLat, lon: placeLon };
-    }
-  }
-
-  if (nearest) {
-    const { place, lat: placeLat, lon: placeLon } = nearest;
-    const name =
-      typeof place.name === "string" && place.name.trim()
-        ? place.name.trim()
-        : (typeof place.id !== "undefined" ? String(place.id) : "Unbenannter Ort");
-    const type =
-      typeof place.type === "string" && place.type.trim()
-        ? place.type
-        : "unknown";
-
-    const snapshot = { name, lat: placeLat, lon: placeLon, type };
-    if (place.id !== undefined && place.id !== null) {
-      snapshot.id = String(place.id);
-    }
-    return snapshot;
-  }
-
-  return { type: "external" };
+  const fallback = await fetchNearestOsmPlace(lat, lon);
+  return fallback || { type: "external" };
 }
 
 const EVENT_WINDOW_MS = 60 * 1000;
@@ -1870,7 +2138,7 @@ async function detectEventByLastSeen(record) {
       if (prevStatus === "online" &&
           state.lastBelowThreshold !== null &&
           timestamp - state.lastBelowThreshold <= EVENT_WINDOW_MS) {
-        const place = determinePlaceForRecord(record);
+        const place = await determinePlaceForRecord(record);
         await registerEvent("landing", record, { place });
       }
     }
@@ -1882,7 +2150,7 @@ async function detectEventByLastSeen(record) {
     if (timestamp - changeTime <= EVENT_WINDOW_MS) {
       if (exceedsAltitude || exceedsSpeed) {
         if (!skipInitialAirborne) {
-          const place = determinePlaceForRecord(record);
+          const place = await determinePlaceForRecord(record);
           await registerEvent("takeoff", record, { place });
         }
         state.pendingTakeoff = null;
@@ -2976,6 +3244,20 @@ async function handleRequest(req, res) {
           sendJSON(res, 200, updated || { hex: normalizedHex, name: aircraftData.name });
         } catch (err) {
           sendError(res, 400, err.message || "Speichern fehlgeschlagen.");
+        }
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        try {
+          const removed = await deleteAircraft(normalizedHex);
+          if (!removed) {
+            sendError(res, 404, "Flugzeug nicht gefunden.");
+            return;
+          }
+          sendJSON(res, 200, { success: true });
+        } catch (err) {
+          sendError(res, 400, err.message || "Löschen fehlgeschlagen.");
         }
         return;
       }
