@@ -1,9 +1,9 @@
 {
   "altitudeThresholdFt": 300,
   "speedThresholdKt": 40,
-  "offlineTimeoutSec": 50,
+  "offlineTimeoutSec": 60,
   "placeMatchRadiusMeters": 500,
-  "notificationsEnabled": false,
+  "notificationsEnabled": true,
   "notifyOnTakeoff": true,
   "notifyOnLanding": true,
   "adsbHistoryAuthHeader": ""

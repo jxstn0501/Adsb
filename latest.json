@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-20T21:51:27.841Z",
-  "hex": "3e0fe9",
-  "callsign": "CHX47",
-  "reg": "D-HXFL",
-  "type": "EC45",
-  "gs": 8,
-  "alt": 275,
-  "vr": 0,
-  "hdg": 277,
-  "lat": 54.089,
-  "lon": 13.409,
-  "lastSeen": 4740
+  "time": "2025-09-23T18:14:27.447Z",
+  "hex": "4ca9cf",
+  "callsign": "RYR2QQ",
+  "reg": "EI-EVG",
+  "type": "B738",
+  "gs": 0,
+  "alt": null,
+  "vr": null,
+  "hdg": null,
+  "lat": 53.095,
+  "lon": 17.997,
+  "lastSeen": 480
 }

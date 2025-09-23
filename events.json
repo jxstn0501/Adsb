@@ -296,5 +296,20 @@
       "lat": 54.089087,
       "lon": 13.408101
     }
+  },
+  {
+    "time": "2025-09-23T17:44:46.116Z",
+    "type": "takeoff",
+    "hex": "4ca9cf",
+    "callsign": "RYR2QQ",
+    "lat": 52.95,
+    "lon": 15.577,
+    "alt": 23650,
+    "gs": 420,
+    "lastSeen": 0,
+    "id": "22",
+    "place": {
+      "type": "external"
+    }
   }
 ]
