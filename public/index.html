@@ -322,6 +322,16 @@
       void initializeTracker();
     });
 
+    function scrollViewportToTop(target) {
+      if (target) {
+        target.scrollTop = 0;
+        requestAnimationFrame(() => {
+          target.scrollTop = 0;
+        });
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    }
+
     function formatDateTime(value) {
       if (!value && value !== 0) {
         return "—";
@@ -1330,6 +1340,7 @@
           <section class="view-panel space-y-6">
             ${createEmptyCard("Event konnte nicht geladen werden.")}
           </section>`;
+        scrollViewportToTop(target);
         activeEventDetail = null;
         return;
       }
@@ -1435,11 +1446,7 @@
           </div>
           ${debugSection}
         </section>`;
-
-      target.scrollTop = 0;
-      requestAnimationFrame(() => {
-        target.scrollTop = 0;
-      });
+      scrollViewportToTop(target);
 
       if (showDebugButton) {
         const debugButton = document.getElementById("eventDebugTrigger");
@@ -1821,9 +1828,7 @@
           <section class="view-panel mx-auto w-full max-w-4xl space-y-6 p-4">
             ${createEmptyCard("Flugzeug nicht gefunden")}
           </section>`;
-        requestAnimationFrame(() => {
-          container.scrollTop = 0;
-        });
+        scrollViewportToTop(container);
         return;
       }
 
