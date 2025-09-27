@@ -47,6 +47,7 @@
   <style>
     :root {
       color-scheme: light;
+      --app-content-offset: calc(env(safe-area-inset-top, 0px) + 6.5rem);
     }
 
     .view-panel {
@@ -75,12 +76,12 @@
     }
 
     .app-content {
-      padding-top: calc(env(safe-area-inset-top, 0px) + 6.5rem);
+      padding-top: var(--app-content-offset);
     }
 
     @supports (padding-top: constant(safe-area-inset-top)) {
-      .app-content {
-        padding-top: calc(constant(safe-area-inset-top) + 6.5rem);
+      :root {
+        --app-content-offset: calc(constant(safe-area-inset-top) + 6.5rem);
       }
     }
 
@@ -112,8 +113,44 @@
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     };
 
-    window.addEventListener("DOMContentLoaded", ensureTopOnLoad);
+    let headerResizeObserver;
+
+    const updateLayoutOffsets = () => {
+      const header = document.querySelector(".app-header");
+      if (!header) {
+        return;
+      }
+
+      const headerHeight = header.getBoundingClientRect().height;
+      if (headerHeight > 0) {
+        document.documentElement.style.setProperty("--app-content-offset", `${headerHeight}px`);
+      }
+    };
+
+    const initializeLayout = () => {
+      ensureTopOnLoad();
+      updateLayoutOffsets();
+
+      if ("ResizeObserver" in window) {
+        const header = document.querySelector(".app-header");
+        if (header) {
+          if (!headerResizeObserver) {
+            headerResizeObserver = new ResizeObserver(() => {
+              updateLayoutOffsets();
+            });
+          }
+
+          headerResizeObserver.observe(header);
+        }
+      }
+    };
+
+    window.addEventListener("DOMContentLoaded", initializeLayout);
     window.addEventListener("pageshow", ensureTopOnLoad);
+    window.addEventListener("load", updateLayoutOffsets);
+    window.addEventListener("resize", () => {
+      window.requestAnimationFrame(updateLayoutOffsets);
+    });
   </script>
 </head>
 <body class="min-h-screen bg-brand-frost font-sans text-brand-ink antialiased">
