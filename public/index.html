@@ -194,6 +194,7 @@
     };
 
     let headerResizeObserver;
+    let layoutRefreshTimer = null;
 
     const updateSafeAreaFallbacks = () => {
       const root = document.documentElement;
@@ -267,6 +268,19 @@
       }
     };
 
+    const refreshLayoutAfterKeyboardInteraction = () => {
+      updateSafeAreaFallbacks();
+      window.requestAnimationFrame(updateLayoutOffsets);
+      if (layoutRefreshTimer) {
+        clearTimeout(layoutRefreshTimer);
+      }
+      layoutRefreshTimer = window.setTimeout(() => {
+        layoutRefreshTimer = null;
+        updateSafeAreaFallbacks();
+        window.requestAnimationFrame(updateLayoutOffsets);
+      }, 250);
+    };
+
     window.addEventListener("DOMContentLoaded", initializeLayout);
     window.addEventListener("pageshow", ensureTopOnLoad);
     window.addEventListener("load", () => {
@@ -277,6 +291,8 @@
       updateSafeAreaFallbacks();
       window.requestAnimationFrame(updateLayoutOffsets);
     });
+    window.addEventListener("focusin", refreshLayoutAfterKeyboardInteraction);
+    window.addEventListener("focusout", refreshLayoutAfterKeyboardInteraction);
     window.addEventListener("orientationchange", () => {
       updateSafeAreaFallbacks();
       window.requestAnimationFrame(updateLayoutOffsets);
@@ -382,6 +398,7 @@
       [LOG_SOURCE_HISTORY]: []
     };
     let currentHex = "";
+    let hexInputDirty = false;
     let currentCallsign = "";
     let settingsInterval = null;
     let currentConfigCache = null;
@@ -1361,11 +1378,18 @@
     }
 
     function setCurrentHex(hex, options = {}) {
-      if (!hex) return;
-      currentHex = String(hex).trim().toLowerCase();
+      const normalized = normalizeHex(hex);
+      if (!normalized) {
+        return;
+      }
+      currentHex = normalized;
       const input = document.getElementById("hexInput");
       if (input) {
-        input.value = currentHex;
+        const currentInputValue = normalizeHex(input.value || "");
+        if (!hexInputDirty || currentInputValue === currentHex) {
+          input.value = currentHex;
+          hexInputDirty = false;
+        }
       }
       if (options && Object.prototype.hasOwnProperty.call(options, "callsign")) {
         currentCallsign = typeof options.callsign === "string" ? options.callsign.trim() : "";
@@ -3806,7 +3830,7 @@
           : defaultMessage;
 
         setHexStatus(responseMessage, "success");
-        handleHexInputChange();
+        handleHexInputChange({ skipMarkDirty: true });
       } catch (err) {
         console.error("[Settings] Fehler beim Setzen des Flugzeugs:", err);
         const message = err && err.message ? err.message : "Flugzeug konnte nicht gesetzt werden.";
@@ -4251,6 +4275,7 @@
       const hexInput = document.getElementById("hexInput");
       if (hexInput) {
         hexInput.addEventListener("input", handleHexInputChange);
+        hexInputDirty = false;
       }
 
       renderPlacesTable(currentPlaces);
@@ -4258,7 +4283,7 @@
       renderAircraftList(currentAircraft);
       updateAircraftFormState();
       renderHexHistoryDropdown();
-      handleHexInputChange();
+      handleHexInputChange({ skipMarkDirty: true });
       renderEventsManagementTable(currentEvents);
       updateLogSourceToggle();
       loadLogOverview(activeLogSource);
@@ -4743,7 +4768,7 @@
         }
         updateAircraftFormState();
         renderHexHistoryDropdown();
-        handleHexInputChange();
+        handleHexInputChange({ skipMarkDirty: true });
         if (showStatus) {
           showAircraftMessage("Flugzeuge aktualisiert.", "success");
         } else {
@@ -4795,7 +4820,7 @@
 
         await refreshAircraftList(false);
         showAircraftMessage(`Flugzeug ${normalized.toUpperCase()} gelöscht.`, "success");
-        handleHexInputChange();
+        handleHexInputChange({ skipMarkDirty: true });
       } catch (err) {
         console.error("[Aircraft] Löschen fehlgeschlagen:", err);
         const message = err && err.message ? err.message : "Flugzeug konnte nicht gelöscht werden.";
@@ -4846,7 +4871,7 @@
         editingAircraftHex = null;
         updateAircraftFormState();
         renderHexHistoryDropdown();
-        handleHexInputChange();
+        handleHexInputChange({ skipMarkDirty: true });
       } catch (err) {
         console.error("[Aircraft] Speichern fehlgeschlagen:", err);
         const message = err && err.message ? err.message : String(err);
@@ -5401,6 +5426,8 @@
         renderPlaceSearchResults([]);
         const message = err && err.message ? err.message : String(err);
         updatePlaceSearchStatus(`Suche fehlgeschlagen: ${message}`, "error");
+      } finally {
+        refreshLayoutAfterKeyboardInteraction();
       }
     }
 
@@ -5457,7 +5484,17 @@
       el.textContent = message || "";
     }
 
-    function handleHexInputChange() {
+    function handleHexInputChange(eventOrOptions) {
+      const options = eventOrOptions instanceof Event
+        ? { markDirty: true }
+        : (typeof eventOrOptions === "object" && eventOrOptions !== null ? eventOrOptions : {});
+      if (options.resetDirty) {
+        hexInputDirty = false;
+      } else if (options.markDirty) {
+        hexInputDirty = true;
+      } else if (!options.skipMarkDirty) {
+        hexInputDirty = true;
+      }
       const input = document.getElementById("hexInput");
       const wrapper = document.getElementById("hexNameWrapper");
       const info = document.getElementById("hexNameInfo");
@@ -5544,6 +5581,7 @@
       if (input) {
         input.value = value;
       }
+      hexInputDirty = true;
       const aircraftName = getAircraftEntry(value)?.name || "";
       if (aircraftName) {
         setHexStatus(`${aircraftName} (${value.toUpperCase()}) übernommen.`, "");
@@ -5553,7 +5591,7 @@
       if (event && event.target) {
         event.target.value = "";
       }
-      handleHexInputChange();
+      handleHexInputChange({ skipMarkDirty: true });
     }
 
     function createStatusCard(message) {
