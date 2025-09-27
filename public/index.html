@@ -47,9 +47,23 @@
   <style>
     :root {
       color-scheme: light;
-      --app-content-offset: calc(env(safe-area-inset-top, 0px) + 6.5rem);
+      --safe-area-top-fallback: 0px;
+      --safe-area-bottom-fallback: 0px;
+      --app-content-offset: calc(var(--safe-area-top-fallback) + 6.5rem);
       --app-nav-height: 6.75rem;
       --app-nav-height-fallback: 6.75rem;
+    }
+
+    @supports (padding-top: env(safe-area-inset-top)) {
+      :root {
+        --app-content-offset: calc(env(safe-area-inset-top) + 6.5rem);
+      }
+    }
+
+    @supports (padding-top: constant(safe-area-inset-top)) {
+      :root {
+        --app-content-offset: calc(constant(safe-area-inset-top) + 6.5rem);
+      }
     }
 
     .view-panel {
@@ -61,6 +75,7 @@
     }
 
     .safe-area-top {
+      padding-top: calc(var(--safe-area-top-fallback) + 1rem);
       padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
     }
 
@@ -71,12 +86,13 @@
     }
 
     .safe-area-bottom {
-      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
+      padding-bottom: var(--safe-area-bottom-fallback);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
     @supports (padding-bottom: constant(safe-area-inset-bottom)) {
       .safe-area-bottom {
-        padding-bottom: calc(constant(safe-area-inset-bottom) + 1.25rem);
+        padding-bottom: constant(safe-area-inset-bottom);
       }
     }
 
@@ -89,6 +105,7 @@
 
     .app-content {
       padding-top: var(--app-content-offset);
+      padding-bottom: calc(var(--app-nav-height, 6.75rem) + var(--safe-area-bottom-fallback));
       padding-bottom: calc(var(--app-nav-height, 6.75rem) + env(safe-area-inset-bottom, 0px));
     }
 
@@ -178,6 +195,23 @@
 
     let headerResizeObserver;
 
+    const updateSafeAreaFallbacks = () => {
+      const root = document.documentElement;
+      if (!root || !window.visualViewport) {
+        return;
+      }
+
+      const viewport = window.visualViewport;
+      const topInset = Math.max(0, Math.round(viewport.offsetTop));
+      const bottomInset = Math.max(
+        0,
+        Math.round(window.innerHeight - viewport.height - viewport.offsetTop)
+      );
+
+      root.style.setProperty("--safe-area-top-fallback", `${topInset}px`);
+      root.style.setProperty("--safe-area-bottom-fallback", `${bottomInset}px`);
+    };
+
     const updateLayoutOffsets = () => {
       const root = document.documentElement;
       if (!root) {
@@ -206,6 +240,7 @@
 
     const initializeLayout = () => {
       ensureTopOnLoad();
+      updateSafeAreaFallbacks();
       updateLayoutOffsets();
 
       if ("ResizeObserver" in window) {
@@ -234,10 +269,29 @@
 
     window.addEventListener("DOMContentLoaded", initializeLayout);
     window.addEventListener("pageshow", ensureTopOnLoad);
-    window.addEventListener("load", updateLayoutOffsets);
+    window.addEventListener("load", () => {
+      updateSafeAreaFallbacks();
+      updateLayoutOffsets();
+    });
     window.addEventListener("resize", () => {
+      updateSafeAreaFallbacks();
       window.requestAnimationFrame(updateLayoutOffsets);
     });
+    window.addEventListener("orientationchange", () => {
+      updateSafeAreaFallbacks();
+      window.requestAnimationFrame(updateLayoutOffsets);
+    });
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", () => {
+        updateSafeAreaFallbacks();
+        window.requestAnimationFrame(updateLayoutOffsets);
+      });
+      window.visualViewport.addEventListener("scroll", () => {
+        updateSafeAreaFallbacks();
+        window.requestAnimationFrame(updateLayoutOffsets);
+      });
+    }
   </script>
 </head>
 <body class="min-h-screen bg-brand-frost font-sans text-brand-ink antialiased">
