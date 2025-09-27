@@ -48,6 +48,8 @@
     :root {
       color-scheme: light;
       --app-content-offset: calc(env(safe-area-inset-top, 0px) + 6.5rem);
+      --app-nav-height: 6.75rem;
+      --app-nav-height-fallback: 6.75rem;
     }
 
     .view-panel {
@@ -68,6 +70,16 @@
       }
     }
 
+    .safe-area-bottom {
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
+    }
+
+    @supports (padding-bottom: constant(safe-area-inset-bottom)) {
+      .safe-area-bottom {
+        padding-bottom: calc(constant(safe-area-inset-bottom) + 1.25rem);
+      }
+    }
+
     .app-header {
       position: fixed;
       left: 0;
@@ -77,11 +89,18 @@
 
     .app-content {
       padding-top: var(--app-content-offset);
+      padding-bottom: calc(var(--app-nav-height, 6.75rem) + env(safe-area-inset-bottom, 0px));
     }
 
     @supports (padding-top: constant(safe-area-inset-top)) {
       :root {
         --app-content-offset: calc(constant(safe-area-inset-top) + 6.5rem);
+      }
+    }
+
+    @supports (padding-bottom: constant(safe-area-inset-bottom)) {
+      .app-content {
+        padding-bottom: calc(var(--app-nav-height-fallback, var(--app-nav-height, 6.75rem)) + constant(safe-area-inset-bottom));
       }
     }
 
@@ -107,6 +126,50 @@
         transform: scale(1);
       }
     }
+
+    @media (max-width: 430px) {
+      html {
+        font-size: clamp(16px, 4vw, 18px);
+      }
+
+      .view-panel {
+        padding-left: 0.25rem;
+        padding-right: 0.25rem;
+      }
+
+      .app-nav {
+        border-radius: 1.5rem;
+        gap: 0.75rem;
+        padding: 0.75rem;
+      }
+
+      .nav-item {
+        border-radius: 1.25rem;
+        gap: 0.35rem;
+        padding: 0.4rem 0.65rem;
+      }
+
+      .nav-item .nav-icon {
+        height: 2.75rem;
+        width: 2.75rem;
+      }
+
+      .text-xs {
+        font-size: 0.82rem !important;
+      }
+
+      .text-sm {
+        font-size: 0.92rem !important;
+      }
+
+      .text-\[0\.65rem\] {
+        font-size: 0.75rem !important;
+      }
+
+      .text-\[0\.6rem\] {
+        font-size: 0.7rem !important;
+      }
+    }
   </style>
   <script>
     const ensureTopOnLoad = () => {
@@ -116,14 +179,28 @@
     let headerResizeObserver;
 
     const updateLayoutOffsets = () => {
-      const header = document.querySelector(".app-header");
-      if (!header) {
+      const root = document.documentElement;
+      if (!root) {
         return;
       }
 
-      const headerHeight = header.getBoundingClientRect().height;
-      if (headerHeight > 0) {
-        document.documentElement.style.setProperty("--app-content-offset", `${headerHeight}px`);
+      const header = document.querySelector(".app-header");
+      if (header) {
+        const headerHeight = header.getBoundingClientRect().height;
+        if (headerHeight > 0) {
+          root.style.setProperty("--app-content-offset", `${headerHeight}px`);
+        }
+      }
+
+      const nav = document.querySelector(".app-nav");
+      if (nav) {
+        const navHeight = nav.getBoundingClientRect().height;
+        if (navHeight > 0) {
+          const computedNavPadding = Math.max(28, Math.round(navHeight * 0.2));
+          const offset = Math.round(navHeight + computedNavPadding);
+          root.style.setProperty("--app-nav-height", `${offset}px`);
+          root.style.setProperty("--app-nav-height-fallback", `${offset}px`);
+        }
       }
     };
 
@@ -132,15 +209,25 @@
       updateLayoutOffsets();
 
       if ("ResizeObserver" in window) {
-        const header = document.querySelector(".app-header");
-        if (header) {
+        const targets = [
+          document.querySelector(".app-header"),
+          document.querySelector(".app-nav")
+        ].filter(Boolean);
+
+        if (targets.length > 0) {
           if (!headerResizeObserver) {
             headerResizeObserver = new ResizeObserver(() => {
               updateLayoutOffsets();
             });
           }
 
-          headerResizeObserver.observe(header);
+          targets.forEach(target => {
+            try {
+              headerResizeObserver.observe(target);
+            } catch (err) {
+              // ignore observer errors for unsupported targets
+            }
+          });
         }
       }
     };
@@ -158,21 +245,21 @@
     <header class="app-header z-40 bg-gradient-to-r from-brand-purple via-brand-red to-brand-purple px-4 py-3 safe-area-top text-white shadow-lg shadow-brand-red/30 sm:px-5">
       <div class="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-center">
         <div class="space-y-0.5">
-          <p class="text-[0.6rem] uppercase tracking-[0.45em] text-white/70">Control Center</p>
+          <p class="text-[0.7rem] uppercase tracking-[0.45em] text-white/70 sm:text-[0.6rem]">Control Center</p>
           <h1 class="text-xl font-semibold leading-snug">Heli Tracker</h1>
         </div>
         <div class="flex flex-1 items-start justify-between gap-3 sm:items-center sm:justify-end">
           <div class="hidden text-right sm:block">
-            <p id="viewTitle" class="text-[0.6rem] uppercase tracking-[0.4em] text-white/70">Map</p>
-            <p class="text-xs font-medium text-white/90">Live monitoring</p>
+            <p id="viewTitle" class="text-[0.7rem] uppercase tracking-[0.4em] text-white/70 sm:text-[0.6rem]">Map</p>
+            <p class="text-[0.8rem] font-medium text-white/90 sm:text-xs">Live monitoring</p>
           </div>
           <div class="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3">
-            <div id="headerCallsign" class="rounded-full bg-white/20 px-4 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.35em] text-white/90 sm:ml-auto">
+            <div id="headerCallsign" class="rounded-full bg-white/20 px-4 py-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.35em] text-white/90 sm:ml-auto sm:text-[0.7rem]">
               —
             </div>
             <span
               id="flightStatusBadge"
-              class="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-4 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.35em] text-white/70"
+              class="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-4 py-1 text-[0.75rem] font-semibold uppercase tracking-[0.35em] text-white/70 sm:text-[0.6rem]"
             >
               —
             </span>
@@ -181,42 +268,42 @@
       </div>
     </header>
 
-    <main id="content" class="app-content relative flex-1 min-w-0 overflow-y-auto px-4 pb-32 sm:px-6 lg:px-8">
+    <main id="content" class="app-content relative flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 lg:px-8">
       <div class="flex h-full items-center justify-center">
-        <div class="rounded-2xl bg-white/80 px-6 py-5 text-base font-medium text-slate-600 shadow-card backdrop-blur">
+        <div class="rounded-2xl bg-white/80 px-5 py-4 text-base font-medium text-slate-600 shadow-card backdrop-blur sm:px-6 sm:py-5">
           Lade Daten...
         </div>
       </div>
     </main>
 
-    <nav class="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-4">
-      <div class="pointer-events-auto mx-auto flex max-w-3xl items-center justify-around gap-3 rounded-3xl border border-white/60 bg-white/70 px-3 py-2 shadow-glass backdrop-blur-xl">
-        <button type="button" data-view="dashboard" onclick="showDashboard()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
-          <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
+    <nav class="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 safe-area-bottom">
+      <div class="app-nav pointer-events-auto mx-auto flex w-full max-w-3xl items-center justify-around gap-3 rounded-3xl border border-white/60 bg-white/70 px-2.5 py-2 shadow-glass backdrop-blur-xl sm:px-3">
+        <button type="button" data-view="dashboard" onclick="showDashboard()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-2.5 py-1.5 text-[0.8rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 sm:px-3 sm:py-2 sm:text-[0.7rem]">
+          <span class="nav-icon flex h-10 w-10 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg sm:h-11 sm:w-11">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75h7.5v7.5h-7.5zM12.75 3.75h7.5v7.5h-7.5zM3.75 12.75h7.5v7.5h-7.5zM12.75 12.75h7.5v7.5h-7.5z" />
             </svg>
           </span>
           <span>Dashboard</span>
         </button>
-        <button type="button" data-view="map" onclick="showADSB()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
-          <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
+        <button type="button" data-view="map" onclick="showADSB()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-2.5 py-1.5 text-[0.8rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 sm:px-3 sm:py-2 sm:text-[0.7rem]">
+          <span class="nav-icon flex h-10 w-10 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg sm:h-11 sm:w-11">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12m-1.5 0v8.25a1.5 1.5 0 01-1.5 1.5h-3.75m-9 0H3.75a1.5 1.5 0 01-1.5-1.5V12" />
             </svg>
           </span>
           <span>Map</span>
         </button>
-        <button type="button" data-view="events" onclick="showEvents()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
-          <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
+        <button type="button" data-view="events" onclick="showEvents()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-2.5 py-1.5 text-[0.8rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 sm:px-3 sm:py-2 sm:text-[0.7rem]">
+          <span class="nav-icon flex h-10 w-10 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg sm:h-11 sm:w-11">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h18m-16.5 6h15m-13.5 6h12" />
             </svg>
           </span>
           <span>Events</span>
         </button>
-        <button type="button" data-view="settings" onclick="showSettings()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-3 py-2 text-[0.7rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40">
-          <span class="nav-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg">
+        <button type="button" data-view="settings" onclick="showSettings()" class="nav-item group flex flex-1 flex-col items-center gap-1 rounded-2xl px-2.5 py-1.5 text-[0.8rem] font-semibold text-slate-500 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 sm:px-3 sm:py-2 sm:text-[0.7rem]">
+          <span class="nav-icon flex h-10 w-10 items-center justify-center rounded-2xl bg-white/60 text-slate-500 transition-all duration-300 ease-out group-hover:scale-105 group-hover:shadow-lg sm:h-11 sm:w-11">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 4.5l.41-1.233A.75.75 0 0112.38 3h.24a.75.75 0 01.72.533L13.75 4.5h1.5l.41-1.233A.75.75 0 0116.88 3h.24a.75.75 0 01.72.533L18.25 4.5m-7 16.5l-.41 1.233a.75.75 0 01-.72.533h-.24a.75.75 0 01-.72-.533L8.75 21h-1.5l-.41 1.233a.75.75 0 01-.72.533h-.24a.75.75 0 01-.72-.533L4.75 21m15-16.5H4.25a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25z" />
             </svg>
@@ -828,6 +915,10 @@
           }
         }
       });
+
+      window.requestAnimationFrame(() => {
+        updateLayoutOffsets();
+      });
     }
 
     function updateSettingsSectionVisibility() {
@@ -1266,7 +1357,7 @@
           <div class="relative overflow-hidden rounded-[1.5rem] bg-slate-200 shadow-card ring-1 ring-black/5">
             <iframe
               src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"
-              class="h-[calc(100vh-14rem)] min-h-[24rem] w-full border-0"
+              class="h-[calc(100dvh-14rem)] min-h-[24rem] w-full border-0"
               loading="lazy"
             ></iframe>
           </div>
@@ -1577,8 +1668,8 @@
     }
 
     function createInfoCard(label, value) {
-      return `<div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-4 shadow-card">
-        <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">${escapeHtml(label)}</p>
+      return `<div class="rounded-2xl border border-brand-purple/10 bg-white px-4 py-3 shadow-card sm:px-5 sm:py-4">
+        <p class="text-[0.75rem] uppercase tracking-[0.35em] text-brand-purple/70 sm:text-[0.65rem]">${escapeHtml(label)}</p>
         <p class="mt-1 text-lg font-semibold text-brand-ink">${escapeHtml(value)}</p>
       </div>`;
     }
@@ -3374,7 +3465,7 @@
           </div>
           <div class="rounded-2xl border border-brand-purple/10 bg-white shadow-card">
             <div class="border-b border-slate-100/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(limitNote)}</div>
-            <div class="max-h-[70vh] overflow-auto">
+            <div class="max-h-[70dvh] overflow-auto">
               <table class="min-w-full divide-y divide-slate-100 text-left">
                 <thead class="sticky top-0 bg-brand-frost/90 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
                   <tr>
@@ -3553,7 +3644,7 @@
           </div>
           <div class="rounded-2xl border border-brand-purple/10 bg-white shadow-card">
             <div class="border-b border-slate-100/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">${escapeHtml(limitNote)}</div>
-            <div class="max-h-[70vh] overflow-auto">
+            <div class="max-h-[70dvh] overflow-auto">
               <table class="min-w-full divide-y divide-slate-100 text-left">
                 <thead class="sticky top-0 bg-brand-frost/90 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
                   <tr>
