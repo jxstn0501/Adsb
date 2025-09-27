@@ -67,6 +67,23 @@
       }
     }
 
+    .app-header {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+    }
+
+    .app-content {
+      padding-top: calc(env(safe-area-inset-top, 0px) + 6.5rem);
+    }
+
+    @supports (padding-top: constant(safe-area-inset-top)) {
+      .app-content {
+        padding-top: calc(constant(safe-area-inset-top) + 6.5rem);
+      }
+    }
+
     @keyframes fadeInUp {
       from {
         opacity: 0;
@@ -101,42 +118,33 @@
 </head>
 <body class="min-h-screen bg-brand-frost font-sans text-brand-ink antialiased">
   <div class="flex min-h-[100dvh] flex-col">
-    <header class="relative z-30 flex items-center justify-between bg-gradient-to-r from-brand-purple via-brand-red to-brand-purple px-4 pb-4 safe-area-top text-white shadow-lg shadow-brand-red/30 sm:px-6">
-      <div class="flex items-center gap-4">
-        <button
-          class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/30 bg-white/20 text-white transition-transform duration-300 hover:bg-white/30 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-          onclick="toggleSidebar()"
-          aria-label="Menü öffnen"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5m-16.5 5.25h16.5m-16.5 5.25h16.5" />
-          </svg>
-        </button>
+    <header class="app-header z-40 bg-gradient-to-r from-brand-purple via-brand-red to-brand-purple px-4 pb-4 safe-area-top text-white shadow-lg shadow-brand-red/30 sm:px-6">
+      <div class="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div class="space-y-1">
           <p class="text-[0.65rem] uppercase tracking-[0.45em] text-white/70">Control Center</p>
           <h1 class="text-2xl font-semibold leading-tight">Heli Tracker</h1>
         </div>
-      </div>
-      <div class="flex items-center gap-4">
-        <div class="hidden text-right sm:block">
-          <p id="viewTitle" class="text-[0.65rem] uppercase tracking-[0.4em] text-white/70">Map</p>
-          <p class="text-sm font-medium text-white/90">Live monitoring</p>
-        </div>
-        <div class="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3">
-          <div id="headerHex" class="rounded-full bg-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/90">
-            —
+        <div class="flex flex-1 items-center justify-between gap-4 sm:justify-end">
+          <div class="hidden text-right sm:block">
+            <p id="viewTitle" class="text-[0.65rem] uppercase tracking-[0.4em] text-white/70">Map</p>
+            <p class="text-sm font-medium text-white/90">Live monitoring</p>
           </div>
-          <span
-            id="flightStatusBadge"
-            class="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-4 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-white/70"
-          >
-            —
-          </span>
+          <div class="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div id="headerCallsign" class="rounded-full bg-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/90">
+              —
+            </div>
+            <span
+              id="flightStatusBadge"
+              class="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-4 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-white/70"
+            >
+              —
+            </span>
+          </div>
         </div>
       </div>
     </header>
 
-    <main id="content" class="relative flex-1 min-w-0 overflow-y-auto px-4 pb-32 pt-6 sm:px-6 lg:px-8">
+    <main id="content" class="app-content relative flex-1 min-w-0 overflow-y-auto px-4 pb-32 sm:px-6 lg:px-8">
       <div class="flex h-full items-center justify-center">
         <div class="rounded-2xl bg-white/80 px-6 py-5 text-base font-medium text-slate-600 shadow-card backdrop-blur">
           Lade Daten...
@@ -182,45 +190,6 @@
     </nav>
   </div>
 
-  <aside
-    id="sidebar"
-    class="fixed inset-y-0 left-0 z-40 flex w-72 max-w-full -translate-x-full flex-col gap-6 overflow-y-auto border-r border-black/5 bg-white/95 px-6 py-8 text-brand-ink shadow-xl ring-1 ring-black/5 backdrop-blur transition-transform duration-300 ease-in-out"
-  >
-    <div class="flex items-center gap-3 rounded-2xl bg-brand-purple/5 px-4 py-3">
-      <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-purple text-sm font-semibold uppercase tracking-[0.35em] text-white">
-        HT
-      </div>
-      <div>
-        <p class="text-[0.65rem] uppercase tracking-[0.4em] text-brand-purple/70">Mission Brief</p>
-        <p class="text-base font-semibold text-brand-ink">Heli Tracker Extras</p>
-      </div>
-    </div>
-    <div class="space-y-4 text-sm text-brand-ink/70">
-      <div class="rounded-2xl bg-brand-frost px-4 py-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/80">About</p>
-        <p class="mt-2 leading-relaxed">Behalte alle Flugbewegungen im Blick und greife schnell auf weiterführende Informationen zu.</p>
-      </div>
-      <div class="rounded-2xl bg-brand-frost px-4 py-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/80">Support</p>
-        <p class="mt-2 leading-relaxed">Fragen? Kontaktiere das Ops-Team unter <span class="font-semibold text-brand-ink">ops@helitracker.app</span>.</p>
-      </div>
-      <div class="rounded-2xl bg-brand-frost px-4 py-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/80">Updates</p>
-        <p class="mt-2 leading-relaxed">Letzte Aktualisierung: <span id="sidebarUpdated" class="font-medium text-brand-ink">Live</span>.</p>
-      </div>
-    </div>
-    <div class="mt-auto flex flex-col gap-3">
-      <button type="button" class="inline-flex items-center justify-center rounded-2xl bg-brand-red px-4 py-3 text-sm font-semibold text-white shadow-card transition-all duration-300 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/60" onclick="closeSidebar()">Zurück zur App</button>
-      <button type="button" class="inline-flex items-center justify-center rounded-2xl border border-brand-purple/30 px-4 py-3 text-sm font-semibold text-brand-purple transition-all duration-300 hover:bg-brand-purple/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40" onclick="closeSidebar()">Logout</button>
-    </div>
-  </aside>
-
-  <div
-    id="overlay"
-    class="pointer-events-none fixed inset-0 z-30 bg-black/30 opacity-0 transition-opacity duration-300"
-    onclick="closeSidebar()"
-  ></div>
-
   <script>
     const DEFAULT_PLACE_RADIUS_FALLBACK_METERS = 500;
     const DEFAULT_ALTITUDE_THRESHOLD_FT = 300;
@@ -235,6 +204,7 @@
       [LOG_SOURCE_HISTORY]: []
     };
     let currentHex = "";
+    let currentCallsign = "";
     let settingsInterval = null;
     let currentConfigCache = null;
     let currentPlaces = [];
@@ -253,8 +223,7 @@
     let activeLogSource = LOG_SOURCE_LIVE;
     let activeLogHex = null;
     let activeSettingsSection = "aircraft";
-    let dashboardMapInstance = null;
-    let dashboardMapMarker = null;
+    let dashboardMapCurrentHex = "";
     let dashboardRefreshTimer = null;
     let dashboardChartInstance = null;
     let latestTelemetry = null;
@@ -756,11 +725,17 @@
     }
 
     function destroyDashboardMap() {
-      if (dashboardMapInstance) {
-        dashboardMapInstance.remove();
-        dashboardMapInstance = null;
+      const frame = document.getElementById("dashboardMapFrame");
+      const fallback = document.getElementById("dashboardMapFallback");
+      if (frame) {
+        frame.src = "about:blank";
+        frame.classList.add("hidden");
       }
-      dashboardMapMarker = null;
+      if (fallback) {
+        fallback.classList.remove("hidden");
+        fallback.textContent = "Lade Position...";
+      }
+      dashboardMapCurrentHex = "";
     }
 
     function destroyDashboardChart() {
@@ -875,7 +850,7 @@
       const detectedHex = (await fetchLatestHex()) || (await fetchFirstHexFromLogs());
 
       if (detectedHex) {
-        setCurrentHex(detectedHex);
+        setCurrentHex(detectedHex, { callsign: "" });
       }
 
       showDashboard();
@@ -1175,17 +1150,47 @@
       void showNotificationForEvent(event);
     }
 
-    function setCurrentHex(hex) {
+    function updateHeaderAircraftLabel() {
+      const badge = document.getElementById("headerCallsign");
+      if (!badge) {
+        return;
+      }
+      const label = currentCallsign
+        ? currentCallsign
+        : (currentHex ? currentHex.toUpperCase() : "—");
+      badge.textContent = label || "—";
+    }
+
+    function setCurrentCallsign(value) {
+      currentCallsign = typeof value === "string" ? value.trim() : "";
+      updateHeaderAircraftLabel();
+    }
+
+    function getTelemetryCallsign(data) {
+      if (!data || typeof data !== "object") {
+        return "";
+      }
+      const direct = typeof data.callsign === "string" ? data.callsign.trim() : "";
+      if (direct) {
+        return direct;
+      }
+      const fallback = typeof data.flight === "string" ? data.flight.trim() : "";
+      return fallback;
+    }
+
+    function setCurrentHex(hex, options = {}) {
       if (!hex) return;
       currentHex = String(hex).trim().toLowerCase();
       const input = document.getElementById("hexInput");
       if (input) {
         input.value = currentHex;
       }
-      const badge = document.getElementById("headerHex");
-      if (badge) {
-        badge.textContent = currentHex ? currentHex.toUpperCase() : "—";
+      if (options && Object.prototype.hasOwnProperty.call(options, "callsign")) {
+        currentCallsign = typeof options.callsign === "string" ? options.callsign.trim() : "";
+      } else if (!options || options.keepCallsign !== true) {
+        currentCallsign = "";
       }
+      updateHeaderAircraftLabel();
     }
 
     function setHexStatus(message, type = "") {
@@ -1213,7 +1218,7 @@
         return;
       }
 
-      setCurrentHex(hex);
+      setCurrentHex(hex, { keepCallsign: true });
       setActiveView("map");
 
       const container = document.getElementById("content");
@@ -1354,8 +1359,6 @@
     function renderEventDetail(event, groupKey = null) {
       stopSettingsInterval();
       setActiveView("events");
-      closeSidebar();
-
       cancelDebugNotificationTimer();
       cleanupEventMap();
 
@@ -1543,36 +1546,6 @@
       </div>`;
     }
 
-    function toggleSidebar() {
-      const sidebar = document.getElementById("sidebar");
-      if (!sidebar) return;
-      if (sidebar.classList.contains("-translate-x-full")) {
-        openSidebar();
-      } else {
-        closeSidebar();
-      }
-    }
-
-    function openSidebar() {
-      const sidebar = document.getElementById("sidebar");
-      const overlay = document.getElementById("overlay");
-      if (!sidebar || !overlay) return;
-      sidebar.classList.remove("-translate-x-full");
-      overlay.classList.remove("pointer-events-none");
-      overlay.classList.remove("opacity-0");
-      overlay.classList.add("opacity-100");
-    }
-
-    function closeSidebar() {
-      const sidebar = document.getElementById("sidebar");
-      const overlay = document.getElementById("overlay");
-      if (!sidebar || !overlay) return;
-      sidebar.classList.add("-translate-x-full");
-      overlay.classList.add("pointer-events-none");
-      overlay.classList.add("opacity-0");
-      overlay.classList.remove("opacity-100");
-    }
-
     function stopSettingsInterval() {
       if (settingsInterval) {
         clearInterval(settingsInterval);
@@ -1583,7 +1556,6 @@
     function showDashboard() {
       stopSettingsInterval();
       setActiveView("dashboard");
-      closeSidebar();
       cleanupEventMap();
       cancelDebugNotificationTimer();
       clearDashboardRefreshTimer();
@@ -1594,75 +1566,33 @@
       if (!container) return;
 
       container.innerHTML = `
-        <section class="view-panel mx-auto w-full max-w-6xl space-y-6 pb-10">
-          <div class="grid gap-6 lg:grid-cols-[2fr_1fr]">
-            <article class="rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <section class="view-panel mx-auto flex h-full w-full max-w-6xl flex-col gap-4 pb-6">
+          <div class="grid flex-1 gap-4 lg:grid-cols-[1.5fr_1fr]">
+            <article class="flex flex-col rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
+              <div class="flex items-center justify-between gap-4">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Live Map</p>
                   <h2 class="text-2xl font-semibold text-brand-ink">Live Map – Current Position</h2>
                 </div>
               </div>
-              <div class="relative mt-6 h-[20rem] w-full overflow-hidden rounded-2xl border border-slate-200/60 bg-slate-100 shadow-inner sm:h-[24rem]">
-                <div id="dashboardMap" class="h-full w-full"></div>
-                <div id="dashboardMapFallback" class="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-medium text-slate-500">
-                  Lade Position...
+              <div class="relative mt-4 h-64 w-full overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-inner">
+                <iframe
+                  id="dashboardMapFrame"
+                  src="about:blank"
+                  class="hidden h-full w-full border-0"
+                  loading="lazy"
+                ></iframe>
+                <div id="dashboardMapFallback" class="absolute inset-0 flex items-center justify-center px-4 text-center text-sm font-medium text-slate-600">
+                  Bitte ein Flugzeug auswählen.
                 </div>
               </div>
             </article>
-            <article class="rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
-              <div class="flex flex-col gap-1">
-                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Flight Data</p>
-                <h2 class="text-2xl font-semibold text-brand-ink">Aktuelle Telemetrie</h2>
-              </div>
-              <div class="mt-6 grid gap-4 sm:grid-cols-3">
-                <div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-5 shadow-card">
-                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Speed</p>
-                  <p id="flightSpeedValue" class="mt-3 text-2xl font-semibold text-brand-ink">—</p>
-                  <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">kt</p>
-                </div>
-                <div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-5 shadow-card">
-                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Altitude</p>
-                  <p id="flightAltitudeValue" class="mt-3 text-2xl font-semibold text-brand-ink">—</p>
-                  <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">ft</p>
-                </div>
-                <div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-5 shadow-card">
-                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Distance</p>
-                  <p id="flightDistanceValue" class="mt-3 text-2xl font-semibold text-brand-ink">—</p>
-                  <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">km</p>
-                </div>
-              </div>
-              <p id="flightDataTimestamp" class="mt-5 text-xs text-slate-500">Aktualisiert: —</p>
-            </article>
-          </div>
-          <div class="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-            <article class="rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
-              <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Statistics</p>
-                  <h2 class="text-2xl font-semibold text-brand-ink">Flüge der letzten 7 Tage</h2>
-                </div>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-brand-purple/20 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-brand-purple transition hover:bg-brand-purple/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40"
-                  onclick="void loadDashboardData()"
-                >
-                  Aktualisieren
-                </button>
-              </div>
-              <div class="relative mt-6 rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-inner">
-                <canvas id="dashboardFlightsChart" class="h-[16rem] w-full"></canvas>
-                <div id="dashboardChartEmpty" class="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl text-sm font-medium text-slate-500">
-                  Keine Event-Daten verfügbar.
-                </div>
-              </div>
-            </article>
-            <article class="rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
-              <div class="flex flex-col gap-1">
+            <article class="flex flex-col justify-between rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
+              <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Weather</p>
                 <h2 class="text-2xl font-semibold text-brand-ink">Lokale Bedingungen</h2>
               </div>
-              <div class="mt-6 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div class="mt-4 flex flex-1 flex-col justify-between gap-6 sm:flex-row sm:items-center sm:gap-6">
                 <div class="space-y-4">
                   <div>
                     <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Temperatur</p>
@@ -1681,23 +1611,74 @@
                   <span id="weatherIcon" aria-hidden="true">☀️</span>
                 </div>
               </div>
-              <p id="weatherMessage" class="mt-5 text-xs text-slate-500">Warte auf Positionsdaten...</p>
+              <p id="weatherMessage" class="mt-4 text-xs text-slate-500">Warte auf Positionsdaten...</p>
             </article>
           </div>
-          <article class="rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
-            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div class="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+            <article class="flex flex-col rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Flight Data</p>
+                  <h2 class="text-2xl font-semibold text-brand-ink">Aktuelle Telemetrie</h2>
+                </div>
+              </div>
+              <div id="telemetryMetrics" class="mt-4 grid gap-4 sm:grid-cols-3">
+                <div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-5 shadow-card">
+                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Speed</p>
+                  <p id="flightSpeedValue" class="mt-3 text-2xl font-semibold text-brand-ink">—</p>
+                  <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">kt</p>
+                </div>
+                <div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-5 shadow-card">
+                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Altitude</p>
+                  <p id="flightAltitudeValue" class="mt-3 text-2xl font-semibold text-brand-ink">—</p>
+                  <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">ft</p>
+                </div>
+                <div class="rounded-2xl border border-brand-purple/10 bg-white px-5 py-5 shadow-card">
+                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Distance</p>
+                  <p id="flightDistanceValue" class="mt-3 text-2xl font-semibold text-brand-ink">—</p>
+                  <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">km</p>
+                </div>
+              </div>
+              <div id="telemetryGroundNotice" class="mt-6 hidden rounded-2xl border border-amber-200/60 bg-amber-100/80 px-5 py-4 text-center text-base font-semibold text-amber-700 shadow-inner">
+                On Ground
+              </div>
+              <p id="flightDataTimestamp" class="mt-4 text-xs text-slate-500">Aktualisiert: —</p>
+            </article>
+            <article class="flex flex-col rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Statistics</p>
+                  <h2 class="text-2xl font-semibold text-brand-ink">Flüge der letzten 7 Tage</h2>
+                </div>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border border-brand-purple/20 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-brand-purple transition hover:bg-brand-purple/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40"
+                  onclick="void loadDashboardData()"
+                >
+                  Aktualisieren
+                </button>
+              </div>
+              <div class="relative mt-4 flex-1 rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-inner">
+                <canvas id="dashboardFlightsChart" class="h-full min-h-[14rem] w-full"></canvas>
+                <div id="dashboardChartEmpty" class="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl text-sm font-medium text-slate-500">
+                  Keine Event-Daten verfügbar.
+                </div>
+              </div>
+            </article>
+          </div>
+          <article class="flex min-h-0 flex-col rounded-3xl bg-white/95 px-6 py-6 shadow-card ring-1 ring-white/60 backdrop-blur">
+            <div class="flex items-center justify-between gap-4">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.35em] text-brand-purple/70">Letzte Events</p>
                 <h2 class="text-2xl font-semibold text-brand-ink">Takeoff &amp; Landing Historie</h2>
               </div>
             </div>
-            <div id="dashboardEventsList" class="mt-6 space-y-3"></div>
+            <div id="dashboardEventsList" class="mt-4 flex-1 space-y-3 overflow-y-auto pr-1"></div>
             <p id="dashboardEventsEmpty" class="mt-4 text-sm text-slate-500">Noch keine Takeoff- oder Landing-Events erkannt.</p>
           </article>
         </section>`;
 
       requestAnimationFrame(() => {
-        initializeDashboardMap();
         void loadDashboardData();
       });
 
@@ -1745,8 +1726,15 @@
 
         latestTelemetry = latest;
 
+        const telemetryCallsign = getTelemetryCallsign(latest);
         if (latest && latest.hex) {
-          setCurrentHex(latest.hex);
+          if (telemetryCallsign) {
+            setCurrentHex(latest.hex, { callsign: telemetryCallsign });
+          } else {
+            setCurrentHex(latest.hex, { keepCallsign: true });
+          }
+        } else if (telemetryCallsign) {
+          setCurrentCallsign(telemetryCallsign);
         }
 
         updateFlightStatusBadgeFromLatest(latest);
@@ -1769,100 +1757,52 @@
       }
     }
 
-    function initializeDashboardMap() {
-      const container = document.getElementById("dashboardMap");
+    function updateDashboardMapWithLatest(latest) {
+      const frame = document.getElementById("dashboardMapFrame");
       const fallback = document.getElementById("dashboardMapFallback");
 
-      if (!container) {
+      if (!frame) {
         return;
       }
 
-      if (dashboardMapInstance) {
-        dashboardMapInstance.remove();
-        dashboardMapInstance = null;
-      }
-      dashboardMapMarker = null;
+      const latestHex = latest && typeof latest.hex === "string" ? latest.hex : null;
+      const normalizedHex = normalizeHex(latestHex || currentHex);
 
-      if (typeof L === "undefined") {
+      if (!normalizedHex) {
         if (fallback) {
           fallback.classList.remove("hidden");
-          fallback.textContent = "Kartenbibliothek nicht verfügbar.";
+          fallback.textContent = "Bitte ein Flugzeug auswählen.";
         }
+        frame.classList.add("hidden");
+        dashboardMapCurrentHex = "";
+        return;
+      }
+
+      if (fallback) {
+        fallback.classList.add("hidden");
+        fallback.textContent = "";
+      }
+
+      frame.classList.remove("hidden");
+
+      if (dashboardMapCurrentHex === normalizedHex) {
         return;
       }
 
       try {
-        dashboardMapInstance = L.map(container, {
-          attributionControl: true,
-          zoomControl: true
-        });
-
-        const defaultCenter = [51.1657, 10.4515];
-        dashboardMapInstance.setView(defaultCenter, 6);
-
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: "&copy; OpenStreetMap-Mitwirkende"
-        }).addTo(dashboardMapInstance);
-
-        if (fallback) {
-          fallback.classList.remove("hidden");
-          fallback.textContent = "Warte auf Positionsdaten...";
-        }
+        const url = new URL("https://globe.adsbexchange.com/");
+        url.searchParams.set("icao", normalizedHex);
+        url.searchParams.set("hideSidebar", "1");
+        url.searchParams.set("hideButtons", "1");
+        frame.src = url.toString();
+        dashboardMapCurrentHex = normalizedHex;
       } catch (err) {
-        console.error("[Dashboard] Karte konnte nicht initialisiert werden:", err);
+        console.warn("[Dashboard] Kartenansicht konnte nicht aktualisiert werden:", err);
         if (fallback) {
           fallback.classList.remove("hidden");
           fallback.textContent = "Karte konnte nicht geladen werden.";
         }
-      }
-    }
-
-    function updateDashboardMapWithLatest(latest) {
-      const fallback = document.getElementById("dashboardMapFallback");
-
-      if (!latest || typeof latest !== "object") {
-        if (fallback) {
-          fallback.classList.remove("hidden");
-          fallback.textContent = "Keine Positionsdaten verfügbar.";
-        }
-        return;
-      }
-
-      const lat = Number(latest.lat);
-      const lon = Number(latest.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        if (fallback) {
-          fallback.classList.remove("hidden");
-          fallback.textContent = "Keine Positionsdaten verfügbar.";
-        }
-        return;
-      }
-
-      if (!dashboardMapInstance) {
-        initializeDashboardMap();
-      }
-
-      if (!dashboardMapInstance || typeof L === "undefined") {
-        if (fallback) {
-          fallback.classList.remove("hidden");
-          fallback.textContent = "Karte konnte nicht geladen werden.";
-        }
-        return;
-      }
-
-      const position = [lat, lon];
-
-      if (!dashboardMapMarker) {
-        dashboardMapMarker = L.marker(position, { title: "Aktuelle Position" }).addTo(dashboardMapInstance);
-      } else {
-        dashboardMapMarker.setLatLng(position);
-      }
-
-      dashboardMapInstance.setView(position, 12);
-
-      if (fallback) {
-        fallback.classList.add("hidden");
+        frame.classList.add("hidden");
       }
     }
 
@@ -1897,6 +1837,10 @@
         return null;
       }
 
+      const latestHex = typeof latest.hex === "string" ? normalizeHex(latest.hex) : "";
+      const selectedHex = normalizeHex(currentHex);
+      const selectedCallsign = typeof currentCallsign === "string" ? currentCallsign.trim().toLowerCase() : "";
+
       const relevantEvents = Array.isArray(events)
         ? events
             .filter(item => {
@@ -1909,7 +1853,21 @@
               }
               const evLat = Number(item.lat);
               const evLon = Number(item.lon);
-              return Number.isFinite(evLat) && Number.isFinite(evLon);
+              if (!Number.isFinite(evLat) || !Number.isFinite(evLon)) {
+                return false;
+              }
+              const eventHex = typeof item.hex === "string" ? normalizeHex(item.hex) : "";
+              const eventCallsign = typeof item.callsign === "string" ? item.callsign.trim().toLowerCase() : "";
+              if (latestHex && eventHex) {
+                return eventHex === latestHex;
+              }
+              if (selectedHex && eventHex) {
+                return eventHex === selectedHex;
+              }
+              if (!selectedHex && selectedCallsign && eventCallsign) {
+                return eventCallsign === selectedCallsign;
+              }
+              return !selectedHex && !selectedCallsign;
             })
             .sort((a, b) => {
               const timeA = new Date(a.time).getTime();
@@ -2078,6 +2036,34 @@
         return;
       }
 
+      const targetHex = normalizeHex(currentHex);
+      const targetCallsign = typeof currentCallsign === "string" ? currentCallsign.trim().toLowerCase() : "";
+
+      if (!targetHex && !targetCallsign) {
+        list.innerHTML = "";
+        if (empty) {
+          empty.textContent = "Bitte ein Flugzeug auswählen, um Events zu sehen.";
+          empty.classList.remove("hidden");
+        }
+        return;
+      }
+
+      const matchesCurrentAircraft = event => {
+        if (!event || typeof event !== "object") {
+          return false;
+        }
+        const eventHex = normalizeHex(event.hex);
+        const eventCallsign = typeof event.callsign === "string" ? event.callsign.trim().toLowerCase() : "";
+
+        if (targetHex && eventHex) {
+          return eventHex === targetHex;
+        }
+        if (targetCallsign && eventCallsign) {
+          return eventCallsign === targetCallsign;
+        }
+        return false;
+      };
+
       const normalized = Array.isArray(events)
         ? events
             .filter(event => {
@@ -2085,7 +2071,10 @@
                 return false;
               }
               const type = typeof event.type === "string" ? event.type.toLowerCase() : "";
-              return type === "takeoff" || type === "landing";
+              if (type !== "takeoff" && type !== "landing") {
+                return false;
+              }
+              return matchesCurrentAircraft(event);
             })
             .sort((a, b) => {
               const timeA = new Date(a.time).getTime();
@@ -2110,6 +2099,7 @@
       if (items.length === 0) {
         list.innerHTML = "";
         if (empty) {
+          empty.textContent = "Keine Events für dieses Flugzeug gefunden.";
           empty.classList.remove("hidden");
         }
         return;
@@ -2173,17 +2163,14 @@
       }
 
       const place = event.place && typeof event.place === "object" ? event.place : null;
-      if (place) {
-        const candidates = ["name", "label", "airport", "title"];
-        for (const key of candidates) {
-          if (typeof place[key] === "string" && place[key].trim()) {
-            return place[key].trim();
-          }
-        }
+      const localityFromPlace = getPlaceDisplayName(place);
+      if (localityFromPlace) {
+        return localityFromPlace;
       }
 
       if (typeof event.location === "string" && event.location.trim()) {
-        return event.location.trim();
+        const locality = extractLocalityLabel(event.location);
+        return locality || "Unbekannter Ort";
       }
 
       return "Unbekannter Ort";
@@ -2203,7 +2190,9 @@
     }
 
     function updateFlightStatusBadgeFromLatest(latest) {
-      updateFlightStatusBadge(deriveFlightStatus(latest));
+      const status = deriveFlightStatus(latest);
+      updateFlightStatusBadge(status);
+      return status;
     }
 
     function deriveFlightStatus(latest) {
@@ -2257,6 +2246,23 @@
 
       badge.className = className;
       badge.textContent = label;
+      updateTelemetryCardState(status);
+    }
+
+    function updateTelemetryCardState(status) {
+      const metrics = document.getElementById("telemetryMetrics");
+      const groundNotice = document.getElementById("telemetryGroundNotice");
+      if (!metrics || !groundNotice) {
+        return;
+      }
+
+      if (status === "ground") {
+        metrics.classList.add("hidden");
+        groundNotice.classList.remove("hidden");
+      } else {
+        metrics.classList.remove("hidden");
+        groundNotice.classList.add("hidden");
+      }
     }
 
     async function updateDashboardWeather(latest) {
@@ -2396,7 +2402,6 @@
     function showADSB() {
       stopSettingsInterval();
       renderMap(currentHex);
-      closeSidebar();
     }
 
 
@@ -2407,7 +2412,6 @@
     async function showEvents() {
       stopSettingsInterval();
       setActiveView("events");
-      closeSidebar();
       cleanupEventMap();
       cancelDebugNotificationTimer();
       activeEventDetail = null;
@@ -2859,58 +2863,70 @@
       return source || "";
     }
 
+    function extractLocalityLabel(value) {
+      if (typeof value !== "string") {
+        return "";
+      }
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return "";
+      }
+      const parts = trimmed.split(",").map(part => part.trim()).filter(Boolean);
+      return parts.length > 0 ? parts[0] : trimmed;
+    }
+
     function getPlaceDisplayName(place) {
       if (!place) {
         return "";
       }
 
       if (typeof place === "string") {
-        return place.trim();
+        return extractLocalityLabel(place);
       }
 
       if (typeof place !== "object") {
         return "";
       }
 
+      const settlementKeys = [
+        "city",
+        "town",
+        "village",
+        "municipality",
+        "locality",
+        "hamlet",
+        "suburb",
+        "neighbourhood"
+      ];
+
+      for (const key of settlementKeys) {
+        const value = typeof place[key] === "string" ? place[key].trim() : "";
+        if (value) {
+          return value;
+        }
+      }
+
       const displayName = typeof place.displayName === "string" ? place.displayName.trim() : "";
       if (displayName) {
-        return displayName;
+        return extractLocalityLabel(displayName);
       }
 
       const name = typeof place.name === "string" ? place.name.trim() : "";
-      const city = typeof place.city === "string" ? place.city.trim() : "";
+      if (name) {
+        return extractLocalityLabel(name);
+      }
+
       const state = typeof place.state === "string" ? place.state.trim() : "";
+      if (state) {
+        return state;
+      }
+
       const country = typeof place.country === "string" ? place.country.trim() : "";
+      if (country) {
+        return country;
+      }
+
       const type = typeof place.type === "string" ? place.type.trim() : "";
-
-      const dedupe = values => {
-        const seen = new Set();
-        const result = [];
-        values.forEach(value => {
-          const text = typeof value === "string" ? value.trim() : "";
-          if (!text) {
-            return;
-          }
-          const key = text.toLowerCase();
-          if (seen.has(key)) {
-            return;
-          }
-          seen.add(key);
-          result.push(text);
-        });
-        return result;
-      };
-
-      const primary = dedupe([name, city]);
-      if (primary.length > 0) {
-        return primary.join(", ");
-      }
-
-      const secondary = dedupe([city, state, country]);
-      if (secondary.length > 0) {
-        return secondary.join(", ");
-      }
-
       if (type && type.toLowerCase() !== "external" && type.toLowerCase() !== "unknown") {
         return type;
       }
@@ -3599,7 +3615,7 @@
           throw new Error(message || `Serverantwort ${response.status}`);
         }
 
-        setCurrentHex(hex);
+        setCurrentHex(hex, { callsign: "" });
         const latest = await updateLatest();
         const aircraftName = getAircraftEntry(hex)?.name || "";
         const defaultMessage = `Neues Ziel gesetzt: ${hex}`;
@@ -3624,8 +3640,15 @@
         }
         const d = await res.json();
         latestTelemetry = d && typeof d === "object" ? d : null;
+        const telemetryCallsign = getTelemetryCallsign(latestTelemetry);
         if (latestTelemetry && latestTelemetry.hex) {
-          setCurrentHex(latestTelemetry.hex);
+          if (telemetryCallsign) {
+            setCurrentHex(latestTelemetry.hex, { callsign: telemetryCallsign });
+          } else {
+            setCurrentHex(latestTelemetry.hex, { keepCallsign: true });
+          }
+        } else if (telemetryCallsign) {
+          setCurrentCallsign(telemetryCallsign);
         }
         updateFlightStatusBadgeFromLatest(latestTelemetry);
         const grid = document.getElementById("latestGrid");
@@ -3678,7 +3701,6 @@
     async function showSettings() {
       stopSettingsInterval();
       setActiveView("settings");
-      closeSidebar();
       cleanupEventMap();
       activeSettingsSection = settingsSectionOrder[0] || "aircraft";
 

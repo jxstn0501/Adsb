@@ -331,7 +331,74 @@ async function deleteAircraft(hex) {
   }
 
   await saveAircraft(filtered);
+  await cleanupAircraftArtifacts(normalizedHex, filtered);
   return true;
+}
+
+async function cleanupAircraftArtifacts(normalizedHex, remainingAircraft = []) {
+  if (!normalizedHex) {
+    return;
+  }
+
+  const logFilePath = path.join(logsDir, `${normalizedHex}.jsonl`);
+  try {
+    await fsp.unlink(logFilePath);
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error(`⚠️ Log-Datei konnte nicht entfernt werden (${normalizedHex}):`, err.message);
+    }
+  }
+
+  const historyPath = path.join(historyLogsDir, normalizedHex);
+  try {
+    await fsp.rm(historyPath, { recursive: true, force: true });
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error(`⚠️ History-Verzeichnis konnte nicht entfernt werden (${normalizedHex}):`, err.message);
+    }
+  }
+
+  delete logCounts[normalizedHex];
+  delete lastLogRecords[normalizedHex];
+  historyDownloadQueues.delete(normalizedHex);
+  historyDownloadsInFlight.delete(normalizedHex);
+  historyExistingDaysCache.delete(normalizedHex);
+  delete flightStatus[normalizedHex];
+
+  const eventsBefore = events.length;
+  events = events.filter(event => normalizeAircraftHex(event && event.hex) !== normalizedHex);
+  if (events.length !== eventsBefore) {
+    await persistEvents();
+  }
+
+  const latestHex = latestData && latestData.hex ? normalizeAircraftHex(latestData.hex) : "";
+  if (latestHex === normalizedHex) {
+    latestData = {};
+    try {
+      await fsp.writeFile("latest.json", JSON.stringify(latestData, null, 2));
+    } catch (err) {
+      console.error("⚠️ latest.json konnte nicht gespeichert werden:", err.message);
+    }
+  }
+
+  if (normalizeAircraftHex(targetHex) === normalizedHex) {
+    const fallbackEntry = Array.isArray(remainingAircraft) && remainingAircraft.length > 0
+      ? normalizeAircraftHex(remainingAircraft[0] && remainingAircraft[0].hex)
+      : "";
+    targetHex = fallbackEntry || "";
+    await persistLastTargetHex(targetHex);
+  }
+}
+
+async function persistLastTargetHex(hexValue) {
+  const normalized = typeof hexValue === "string" && hexValue.trim()
+    ? hexValue.trim().toLowerCase()
+    : "";
+  try {
+    await fsp.writeFile("last_target.json", JSON.stringify({ hex: normalized }, null, 2));
+  } catch (err) {
+    console.error("⚠️ last_target.json konnte nicht gespeichert werden:", err.message);
+  }
 }
 
 function startAircraftWatcher() {
@@ -3118,11 +3185,7 @@ async function handleSetRequest(res, hexParam) {
   const aircraftEntry = getAircraftByHex(targetHex);
   const aircraftName = aircraftEntry && aircraftEntry.name ? aircraftEntry.name : null;
 
-  try {
-    await fsp.writeFile("last_target.json", JSON.stringify({ hex: targetHex }, null, 2));
-  } catch (err) {
-    console.error("⚠️ last_target.json konnte nicht gespeichert werden:", err.message);
-  }
+  await persistLastTargetHex(targetHex);
 
   if (!page) {
     console.log("🎯 Neues Ziel gespeichert, Browser noch nicht bereit:", targetHex);
