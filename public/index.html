@@ -424,6 +424,15 @@
     let latestTelemetry = null;
     let lastWeatherFetch = { lat: null, lon: null, timestamp: 0 };
     let lastWeatherData = null;
+    const GEOLOCATION_SUPPORTED = typeof navigator !== "undefined" && !!(navigator && navigator.geolocation);
+    let deviceLocationStatus = GEOLOCATION_SUPPORTED ? "idle" : "unsupported";
+    let deviceLocation = null;
+    let deviceLocationError = null;
+    let deviceLocationWatchId = null;
+    let deviceLocationInitialized = false;
+    let dashboardMapCurrentConfigKey = "";
+    let mapViewCurrentConfigKey = "";
+    const ADSB_DEFAULT_ZOOM = 9;
     const EVENTS_VIEW_OVERVIEW = "overview";
     const EVENTS_VIEW_GROUP = "group";
     const EVENTS_VIEW_DETAIL = "detail";
@@ -533,6 +542,338 @@
       const minutes = String(date.getMinutes()).padStart(2, "0");
 
       return `${day}.${month}.${year} ${hours}:${minutes}`;
+    }
+
+    function isGeolocationSupported() {
+      return GEOLOCATION_SUPPORTED;
+    }
+
+    function setupDeviceLocationUI() {
+      const button = document.getElementById("deviceLocationButton");
+      if (button) {
+        button.addEventListener("click", event => {
+          event.preventDefault();
+          requestDeviceLocationAccess();
+        });
+      }
+      updateDeviceLocationNotice();
+    }
+
+    function initializeDeviceLocationTracking() {
+      if (deviceLocationInitialized) {
+        return;
+      }
+      deviceLocationInitialized = true;
+
+      if (!isGeolocationSupported()) {
+        deviceLocationStatus = "unsupported";
+        updateDeviceLocationNotice();
+        return;
+      }
+
+      updateDeviceLocationNotice();
+
+      if (navigator.permissions && navigator.permissions.query) {
+        try {
+          navigator.permissions
+            .query({ name: "geolocation" })
+            .then(status => {
+              handleDeviceLocationPermission(status);
+              const listener = () => handleDeviceLocationPermission(status);
+              if (typeof status.addEventListener === "function") {
+                status.addEventListener("change", listener);
+              } else {
+                status.onchange = listener;
+              }
+            })
+            .catch(() => {
+              // Permissions API nicht verfügbar oder verweigert
+            });
+        } catch (err) {
+          // Ignorieren, wenn Zugriff auf Permissions API fehlschlägt
+        }
+      }
+    }
+
+    function handleDeviceLocationPermission(status) {
+      if (!status) {
+        return;
+      }
+
+      const state = status.state || status.status;
+      if (state === "granted") {
+        startDeviceLocationWatch({ force: true });
+      } else if (state === "denied") {
+        stopDeviceLocationWatch();
+        deviceLocationStatus = "denied";
+        deviceLocation = null;
+        deviceLocationError = null;
+        updateDeviceLocationNotice();
+        refreshFlightDistance();
+        refreshAdsbExchangeFrames();
+      } else {
+        deviceLocationStatus = "idle";
+        updateDeviceLocationNotice();
+      }
+    }
+
+    function requestDeviceLocationAccess() {
+      deviceLocationError = null;
+      startDeviceLocationWatch({ force: true });
+    }
+
+    function startDeviceLocationWatch(options = {}) {
+      if (!isGeolocationSupported()) {
+        deviceLocationStatus = "unsupported";
+        updateDeviceLocationNotice();
+        return;
+      }
+
+      const { force = false } = options;
+
+      if (deviceLocationWatchId !== null) {
+        if (!force) {
+          return;
+        }
+        stopDeviceLocationWatch();
+      }
+
+      const geo = navigator.geolocation;
+      if (!geo) {
+        deviceLocationStatus = "unsupported";
+        updateDeviceLocationNotice();
+        return;
+      }
+
+      deviceLocationStatus = "requesting";
+      updateDeviceLocationNotice();
+
+      const successHandler = position => {
+        deviceLocationStatus = "active";
+        applyDeviceLocation(position);
+      };
+
+      const errorHandler = error => {
+        handleDeviceLocationError(error);
+      };
+
+      try {
+        deviceLocationWatchId = geo.watchPosition(successHandler, errorHandler, {
+          enableHighAccuracy: true,
+          maximumAge: 15000,
+          timeout: 20000
+        });
+      } catch (err) {
+        handleDeviceLocationError(err);
+        return;
+      }
+
+      try {
+        geo.getCurrentPosition(successHandler, errorHandler, {
+          enableHighAccuracy: true,
+          maximumAge: 15000,
+          timeout: 10000
+        });
+      } catch (err) {
+        handleDeviceLocationError(err);
+      }
+    }
+
+    function stopDeviceLocationWatch() {
+      if (deviceLocationWatchId !== null && navigator.geolocation) {
+        try {
+          navigator.geolocation.clearWatch(deviceLocationWatchId);
+        } catch (err) {
+          // Ignorieren, wenn Löschen nicht möglich ist
+        }
+      }
+      deviceLocationWatchId = null;
+    }
+
+    function applyDeviceLocation(position) {
+      if (!position || !position.coords) {
+        return;
+      }
+
+      const lat = Number(position.coords.latitude);
+      const lon = Number(position.coords.longitude);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return;
+      }
+
+      const accuracy = Number(position.coords.accuracy);
+      const timestamp = typeof position.timestamp === "number" ? position.timestamp : Date.now();
+
+      deviceLocation = {
+        lat,
+        lon,
+        accuracy: Number.isFinite(accuracy) ? accuracy : null,
+        timestamp
+      };
+      deviceLocationError = null;
+      deviceLocationStatus = "active";
+
+      updateDeviceLocationNotice();
+      refreshFlightDistance();
+      refreshAdsbExchangeFrames();
+    }
+
+    function handleDeviceLocationError(error) {
+      deviceLocationError = error || null;
+
+      if (error && typeof error.code === "number") {
+        if (error.code === error.PERMISSION_DENIED) {
+          deviceLocationStatus = "denied";
+          stopDeviceLocationWatch();
+          deviceLocation = null;
+        } else if (error.code === error.POSITION_UNAVAILABLE || error.code === error.TIMEOUT) {
+          deviceLocationStatus = "error";
+        } else {
+          deviceLocationStatus = "error";
+        }
+      } else {
+        deviceLocationStatus = "error";
+      }
+
+      updateDeviceLocationNotice();
+      refreshFlightDistance();
+      refreshAdsbExchangeFrames();
+    }
+
+    function getValidDeviceLocation() {
+      if (!deviceLocation || typeof deviceLocation !== "object") {
+        return null;
+      }
+      const lat = Number(deviceLocation.lat);
+      const lon = Number(deviceLocation.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return null;
+      }
+      return { lat, lon };
+    }
+
+    function getDeviceLocationKey(precision = 4) {
+      const loc = getValidDeviceLocation();
+      if (!loc) {
+        return "";
+      }
+      return `${loc.lat.toFixed(precision)}|${loc.lon.toFixed(precision)}`;
+    }
+
+    function refreshFlightDistance() {
+      if (typeof updateDashboardFlightMetrics !== "function") {
+        return;
+      }
+      updateDashboardFlightMetrics(latestTelemetry, currentEvents);
+    }
+
+    function refreshAdsbExchangeFrames() {
+      updateDashboardMapWithLatest(latestTelemetry, { locationUpdate: true });
+      updateStandaloneMapFrame();
+    }
+
+    function buildAdsbExchangeUrl(hex) {
+      const normalized = normalizeHex(hex);
+      if (!normalized) {
+        return "";
+      }
+
+      const location = getValidDeviceLocation();
+
+      try {
+        const url = new URL("https://globe.adsbexchange.com/");
+        url.searchParams.set("icao", normalized);
+        url.searchParams.set("hideSidebar", "1");
+        url.searchParams.set("hideButtons", "1");
+        if (location) {
+          url.searchParams.set("lat", location.lat.toFixed(5));
+          url.searchParams.set("lon", location.lon.toFixed(5));
+          url.searchParams.set("zoom", String(ADSB_DEFAULT_ZOOM));
+        }
+        return url.toString();
+      } catch (err) {
+        console.warn("[Map] ADS-B URL konnte nicht erstellt werden:", err);
+        const base = `${ADSB_BASE_URL}${encodeURIComponent(normalized)}`;
+        if (location) {
+          const params = new URLSearchParams({
+            lat: location.lat.toFixed(5),
+            lon: location.lon.toFixed(5),
+            zoom: String(ADSB_DEFAULT_ZOOM),
+            hideSidebar: "1",
+            hideButtons: "1"
+          });
+          return `${base}&${params.toString()}`;
+        }
+        return `${base}&hideSidebar=1&hideButtons=1`;
+      }
+    }
+
+    function updateDeviceLocationNotice() {
+      const notice = document.getElementById("deviceLocationNotice");
+      const message = document.getElementById("deviceLocationMessage");
+      const button = document.getElementById("deviceLocationButton");
+
+      if (!notice || !message) {
+        return;
+      }
+
+      let buttonLabel = "Standort aktivieren";
+      let showButton = true;
+      let disableButton = false;
+      let text = "Standortzugriff erforderlich, um die Distanz zum Flugzeug zu berechnen.";
+      const location = getValidDeviceLocation();
+
+      if (!isGeolocationSupported()) {
+        text = "Gerät unterstützt keine Standortabfrage.";
+        showButton = false;
+      } else if (deviceLocationStatus === "requesting") {
+        text = "Standort wird angefragt...";
+        buttonLabel = "Wird geladen…";
+        disableButton = true;
+      } else if (deviceLocationStatus === "active" && location) {
+        const accuracy = deviceLocation && Number.isFinite(deviceLocation.accuracy)
+          ? Math.round(deviceLocation.accuracy)
+          : null;
+        const timestamp = deviceLocation && Number.isFinite(deviceLocation.timestamp)
+          ? new Date(deviceLocation.timestamp)
+          : null;
+        const timeLabel = timestamp && !Number.isNaN(timestamp.getTime())
+          ? timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : null;
+        text = "Standort aktiv.";
+        if (accuracy !== null) {
+          text += ` Genauigkeit ±${accuracy} m.`;
+        }
+        if (timeLabel) {
+          text += ` Aktualisiert um ${timeLabel}.`;
+        }
+        showButton = false;
+      } else if (deviceLocationStatus === "denied") {
+        text = "Standortzugriff wurde verweigert. Bitte Freigabe in den Geräteeinstellungen erteilen.";
+        buttonLabel = "Erneut versuchen";
+      } else if (deviceLocationStatus === "error") {
+        const detail = deviceLocationError && deviceLocationError.message
+          ? ` (${deviceLocationError.message})`
+          : "";
+        text = `Standort konnte nicht ermittelt werden${detail}.`;
+        buttonLabel = "Erneut versuchen";
+      } else {
+        text = "Standortzugriff erforderlich, um die Distanz zum Flugzeug zu berechnen.";
+      }
+
+      message.textContent = text;
+
+      if (button) {
+        if (showButton) {
+          button.classList.remove("hidden");
+          button.disabled = disableButton;
+          button.textContent = buttonLabel;
+        } else {
+          button.classList.add("hidden");
+          button.disabled = true;
+        }
+      }
     }
 
     function formatDateLabel(value) {
@@ -931,6 +1272,7 @@
         fallback.textContent = "Lade Position...";
       }
       dashboardMapCurrentHex = "";
+      dashboardMapCurrentConfigKey = "";
     }
 
     function destroyDashboardChart() {
@@ -1420,6 +1762,7 @@
         if (container) {
           container.innerHTML = createStatusCard("Bitte eine ICAO Hex eingeben.");
         }
+        mapViewCurrentConfigKey = "";
         setActiveView("map");
         return;
       }
@@ -1434,12 +1777,51 @@
         <section class="view-panel">
           <div class="relative overflow-hidden rounded-[1.5rem] bg-slate-200 shadow-card ring-1 ring-black/5">
             <iframe
-              src="https://globe.adsbexchange.com/?icao=${encodeURIComponent(currentHex)}"
+              id="mapViewFrame"
+              src="about:blank"
               class="h-[calc(100dvh-14rem)] min-h-[24rem] w-full border-0"
               loading="lazy"
             ></iframe>
           </div>
         </section>`;
+
+      updateStandaloneMapFrame({ force: true });
+    }
+
+    function updateStandaloneMapFrame(options = {}) {
+      const frame = document.getElementById("mapViewFrame");
+
+      if (!frame) {
+        if (options.force) {
+          mapViewCurrentConfigKey = "";
+        }
+        return;
+      }
+
+      const hex = normalizeHex(currentHex);
+      if (!hex) {
+        frame.src = "about:blank";
+        mapViewCurrentConfigKey = "";
+        return;
+      }
+
+      const locationKey = getDeviceLocationKey();
+      const configKey = `${hex}|${locationKey}`;
+      if (!options.force && mapViewCurrentConfigKey === configKey) {
+        return;
+      }
+
+      try {
+        const url = buildAdsbExchangeUrl(hex);
+        if (!url) {
+          throw new Error("URL leer");
+        }
+        frame.src = url;
+        mapViewCurrentConfigKey = configKey;
+      } catch (err) {
+        console.warn("[Map] Einzelkartenansicht konnte nicht aktualisiert werden:", err);
+        mapViewCurrentConfigKey = "";
+      }
     }
 
     function openEventDetailView(payload, groupKey = "") {
@@ -1845,6 +2227,24 @@
                   <p class="text-xs font-medium uppercase tracking-[0.25em] text-slate-400">km</p>
                 </div>
               </div>
+              <div
+                id="deviceLocationNotice"
+                class="mt-4 flex flex-col gap-3 rounded-2xl border border-dashed border-brand-purple/30 bg-brand-purple/5 px-5 py-4 text-sm text-brand-ink"
+              >
+                <div>
+                  <p class="text-[0.65rem] uppercase tracking-[0.35em] text-brand-purple/70">Device Location</p>
+                  <p id="deviceLocationMessage" class="mt-2 text-sm font-medium text-brand-ink">
+                    Standortzugriff erforderlich, um die Distanz zum Flugzeug zu berechnen.
+                  </p>
+                </div>
+                <button
+                  id="deviceLocationButton"
+                  type="button"
+                  class="inline-flex items-center justify-center self-start rounded-xl bg-brand-purple px-4 py-2 text-[0.75rem] font-semibold uppercase tracking-[0.3em] text-white shadow transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/40 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Standort aktivieren
+                </button>
+              </div>
               <div id="telemetryGroundNotice" class="mt-6 hidden rounded-2xl border border-amber-200/60 bg-amber-100/80 px-5 py-4 text-center text-base font-semibold text-amber-700 shadow-inner">
                 On Ground
               </div>
@@ -1883,6 +2283,9 @@
             <p id="dashboardEventsEmpty" class="mt-4 text-sm text-slate-500">Noch keine Takeoff- oder Landing-Events erkannt.</p>
           </article>
         </section>`;
+
+      setupDeviceLocationUI();
+      initializeDeviceLocationTracking();
 
       requestAnimationFrame(() => {
         void loadDashboardData();
@@ -1963,7 +2366,7 @@
       }
     }
 
-    function updateDashboardMapWithLatest(latest) {
+    function updateDashboardMapWithLatest(latest, options = {}) {
       const frame = document.getElementById("dashboardMapFrame");
       const fallback = document.getElementById("dashboardMapFallback");
 
@@ -1981,6 +2384,7 @@
         }
         frame.classList.add("hidden");
         dashboardMapCurrentHex = "";
+        dashboardMapCurrentConfigKey = "";
         return;
       }
 
@@ -1991,17 +2395,21 @@
 
       frame.classList.remove("hidden");
 
-      if (dashboardMapCurrentHex === normalizedHex) {
+      const locationKey = getDeviceLocationKey();
+      const configKey = `${normalizedHex}|${locationKey}`;
+
+      if (!options.force && dashboardMapCurrentConfigKey === configKey) {
         return;
       }
 
       try {
-        const url = new URL("https://globe.adsbexchange.com/");
-        url.searchParams.set("icao", normalizedHex);
-        url.searchParams.set("hideSidebar", "1");
-        url.searchParams.set("hideButtons", "1");
-        frame.src = url.toString();
+        const url = buildAdsbExchangeUrl(normalizedHex);
+        if (!url) {
+          throw new Error("Ungültige URL");
+        }
+        frame.src = url;
         dashboardMapCurrentHex = normalizedHex;
+        dashboardMapCurrentConfigKey = configKey;
       } catch (err) {
         console.warn("[Dashboard] Kartenansicht konnte nicht aktualisiert werden:", err);
         if (fallback) {
@@ -2009,6 +2417,7 @@
           fallback.textContent = "Karte konnte nicht geladen werden.";
         }
         frame.classList.add("hidden");
+        dashboardMapCurrentConfigKey = "";
       }
     }
 
@@ -2041,6 +2450,14 @@
       const lon = Number(latest.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
         return null;
+      }
+
+      const deviceCoords = getValidDeviceLocation();
+      if (deviceCoords) {
+        const distanceToDevice = haversineDistanceKm(deviceCoords.lat, deviceCoords.lon, lat, lon);
+        if (Number.isFinite(distanceToDevice)) {
+          return distanceToDevice;
+        }
       }
 
       const latestHex = typeof latest.hex === "string" ? normalizeHex(latest.hex) : "";
