@@ -111,4 +111,7 @@ localPort = 44129
 externalPort = 3000
 exposeLocalhost = true
 
+[objectStorage]
+defaultBucketID = "replit-objstore-cda93f6d-7119-49ac-b7c1-53b888f03ade"
+
 
