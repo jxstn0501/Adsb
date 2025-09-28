@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-28T06:28:43.630Z",
-  "hex": "3e0fe9",
-  "callsign": "CHX47",
-  "reg": "D-HXFL",
-  "type": "EC45",
-  "gs": 9,
-  "alt": -225,
-  "vr": -320,
-  "hdg": 153.4,
-  "lat": 54.089,
-  "lon": 13.408,
-  "lastSeen": 1620
+  "time": "2025-09-28T06:48:17.727Z",
+  "hex": "3c658e",
+  "callsign": "DLH811",
+  "reg": "D-AILN",
+  "type": "A319",
+  "gs": 435,
+  "alt": 36025,
+  "vr": 64,
+  "hdg": 204.3,
+  "lat": 52.141,
+  "lon": 10.838,
+  "lastSeen": 0
 }
