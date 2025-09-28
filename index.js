@@ -3482,8 +3482,15 @@ function serveStatic(res, filePath) {
   });
 }
 
-function sendJSON(res, statusCode, payload) {
-  res.writeHead(statusCode, { "Content-Type": "application/json" });
+function sendJSON(res, statusCode, payload, extraHeaders = {}) {
+  const headers = Object.assign(
+    {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store, must-revalidate"
+    },
+    extraHeaders || {}
+  );
+  res.writeHead(statusCode, headers);
   res.end(JSON.stringify(payload));
 }
 
@@ -3568,8 +3575,40 @@ async function parseJsonBody(req) {
   });
 }
 
-async function handleSetRequest(res, hexParam) {
-  const raw = typeof hexParam === "string" ? hexParam.trim() : "";
+async function handleSetRequest(req, res, hexParam) {
+  const method = req.method ? req.method.toUpperCase() : "GET";
+  if (method !== "GET" && method !== "POST") {
+    res.writeHead(405, { Allow: "GET, POST" });
+    res.end();
+    return;
+  }
+
+  let raw = typeof hexParam === "string" ? hexParam.trim() : "";
+
+  if (!raw && method === "POST") {
+    let body;
+    try {
+      body = await parseJsonBody(req);
+    } catch (err) {
+      const statusCode = err && err.statusCode ? err.statusCode : 400;
+      const message = err && err.message ? err.message : "Ungültiger JSON-Body.";
+      sendError(res, statusCode, message);
+      return;
+    }
+
+    if (body && typeof body === "object" && body !== null) {
+      const bodyHex = typeof body.hex === "string" ? body.hex.trim() : "";
+      if (bodyHex) {
+        raw = bodyHex;
+      }
+    }
+
+    if (!raw) {
+      sendError(res, 400, "Feld 'hex' wird benötigt.");
+      return;
+    }
+  }
+
   if (!raw) {
     sendError(res, 400, "Bitte ?hex=xxxxxx angeben.");
     return;
@@ -3917,7 +3956,7 @@ async function handleRequest(req, res) {
   }
 
   if (q.pathname === "/set") {
-    await handleSetRequest(res, q.query.hex);
+    await handleSetRequest(req, res, q.query.hex);
     return;
   }
 
