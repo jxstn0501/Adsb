@@ -413,5 +413,30 @@
       "lat": 54.089087,
       "lon": 13.408101
     }
+  },
+  {
+    "time": "2025-09-28T10:40:13.509Z",
+    "type": "takeoff",
+    "hex": "3ed849",
+    "callsign": "DKWWF",
+    "lat": 50.302,
+    "lon": 8.527,
+    "alt": 2600,
+    "gs": 132,
+    "lastSeen": 0,
+    "id": "22",
+    "place": {
+      "name": "Ziegelei",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Ziegelei, Anspach, Neu Anspach, Neu-Anspach, Hochtaunuskreis, Hessen, 61267, Deutschland",
+      "lat": 50.302,
+      "lon": 8.527,
+      "city": "Neu-Anspach",
+      "country": "Deutschland",
+      "state": "Hessen",
+      "osmId": "10961794364",
+      "osmType": "node"
+    }
   }
 ]
