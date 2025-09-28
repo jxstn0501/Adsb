@@ -88,6 +88,7 @@ start = "typescript-language-server --stdio"
 [deployment]
 run = ["sh", "-c", "node index.js"]
 deploymentTarget = "gce"
+ignorePorts = true
 
 [agent]
 expertMode = true
@@ -99,6 +100,11 @@ externalPort = 80
 [[ports]]
 localPort = 32949
 externalPort = 3001
+exposeLocalhost = true
+
+[[ports]]
+localPort = 34125
+externalPort = 8080
 exposeLocalhost = true
 
 [[ports]]
