@@ -4205,7 +4205,7 @@
           renderHexHistoryDropdown();
         }
 
-        const response = await fetch('set', {
+        const response = await fetch('/set', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ hex })
