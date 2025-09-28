@@ -4205,7 +4205,11 @@
           renderHexHistoryDropdown();
         }
 
-        const response = await fetch(`/set?hex=${encodeURIComponent(hex)}`);
+        const response = await fetch('set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hex })
+        });
         const contentType = response.headers.get("content-type") || "";
         let payload = null;
 
