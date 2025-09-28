@@ -3801,6 +3801,66 @@ async function handleSetRequest(req, res, hexParam) {
 }
 
 async function handleRequest(req, res) {
+  const origin = req.headers.origin;
+  const method = req.method || 'GET';
+  const requestedMethod = req.headers['access-control-request-method'];
+  
+  // Helper function to check if origin is trusted
+  function isTrustedOrigin(origin) {
+    if (!origin) return false;
+    
+    try {
+      const url = new URL(origin);
+      const hostname = url.hostname;
+      
+      // Allow exact Replit domains and their subdomains
+      const trustedDomains = [
+        'replit.dev',
+        'replit.app', 
+        'replit.com'
+      ];
+      
+      return trustedDomains.some(domain => 
+        hostname === domain || // exact match
+        hostname.endsWith('.' + domain) // subdomain match
+      );
+    } catch {
+      return false;
+    }
+  }
+  
+  // Set CORS headers based on method and origin
+  if (method === 'OPTIONS') {
+    // Handle preflight requests properly
+    if (isTrustedOrigin(origin) && requestedMethod && ['POST', 'PUT', 'DELETE'].includes(requestedMethod)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+    res.writeHead(200);
+    res.end();
+    return;
+  } else if (['POST', 'PUT', 'DELETE'].includes(method)) {
+    // State-changing methods: only allow trusted origins
+    if (isTrustedOrigin(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      // Block untrusted cross-origin state changes immediately
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Cross-origin requests not allowed from untrusted domains' }));
+      return;
+    }
+  } else {
+    // Safe methods (GET, HEAD): allow any origin
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
   const q = url.parse(req.url, true);
 
   if (q.pathname === "/latest") {

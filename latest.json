@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-28T20:34:33.263Z",
-  "hex": "3e0fe9",
-  "callsign": "CHX47",
-  "reg": "D-HXFL",
+  "time": "2025-09-28T20:47:53.550Z",
+  "hex": "3e120a",
+  "callsign": "CHX66",
+  "reg": "D-HYAK",
   "type": "EC45",
-  "gs": 7,
-  "alt": null,
-  "vr": -320,
-  "hdg": 157,
-  "lat": 54.089,
-  "lon": 13.408,
-  "lastSeen": 9180
+  "gs": 1,
+  "alt": 675,
+  "vr": -128,
+  "hdg": 0,
+  "lat": 49.605,
+  "lon": 7.792,
+  "lastSeen": 10800
 }
