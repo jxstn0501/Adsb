@@ -438,5 +438,30 @@
       "osmId": "10961794364",
       "osmType": "node"
     }
+  },
+  {
+    "time": "2025-09-28T17:38:19.315Z",
+    "type": "landing",
+    "hex": "3e120a",
+    "callsign": "CHX66",
+    "lat": 49.605,
+    "lon": 7.792,
+    "alt": 675,
+    "gs": 1,
+    "lastSeen": 60,
+    "id": "23",
+    "place": {
+      "name": "Molkenborn",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Molkenborn, Imsweiler, Nordpfälzer Land, Donnersbergkreis, Rheinland-Pfalz, 67808, Deutschland",
+      "lat": 49.605,
+      "lon": 7.792,
+      "city": "Imsweiler",
+      "country": "Deutschland",
+      "state": "Rheinland-Pfalz",
+      "osmId": "3563509035",
+      "osmType": "node"
+    }
   }
 ]
