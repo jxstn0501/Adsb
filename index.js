@@ -4133,19 +4133,28 @@ const app = http.createServer((req, res) => {
 });
 
 async function bootstrap() {
-  try {
-    await initializeState();
-  } catch (err) {
-    console.error("❌ Initialisierung fehlgeschlagen:", err.message);
-  }
-
   const envPort = Number.parseInt(process.env.PORT, 10);
   const port = Number.isInteger(envPort) && envPort > 0 ? envPort : 3000;
+  
+  // Start HTTP server immediately to satisfy workflow requirements
   app.listen(port, "0.0.0.0", () => {
     console.log(`🚀 Server läuft auf Port ${port}`);
-    startBrowser().catch(err => {
-      console.error("❌ Starten des Browsers fehlgeschlagen:", err.message);
-    });
+    
+    // Initialize complex components in background after server is running
+    (async () => {
+      try {
+        console.log("⚙️ Initialisiere Anwendungskomponenten...");
+        await initializeState();
+        console.log("✅ Initialisierung abgeschlossen");
+        
+        console.log("🌐 Starte Browser...");
+        await startBrowser();
+        console.log("✅ Browser gestartet");
+      } catch (err) {
+        console.error("❌ Fehler beim Initialisieren:", err.message);
+        console.error("⚠️ Server läuft, aber einige Funktionen sind möglicherweise nicht verfügbar");
+      }
+    })();
   });
 }
 
