@@ -57,6 +57,7 @@ const PAGE_DEFAULT_TIMEOUT_MS = 60000;
 const PAGE_OPERATION_TIMEOUT_MS = 45000;
 const PUPPETEER_PROTOCOL_TIMEOUT_MS = 120000;
 const PAGE_OPERATION_TIMEOUT_CODE = "PAGE_OPERATION_TIMEOUT";
+const BROWSER_CLOSE_TIMEOUT_MS = 10_000;
 let pageRecoveryInProgress = false;
 
 const MAX_CONSECUTIVE_TIMEOUTS_BEFORE_BROWSER_RESTART = 3;
@@ -1444,12 +1445,18 @@ function createSerialTaskQueue() {
     }
   };
 
-  return function enqueue(fn) {
+  const enqueue = function enqueue(fn) {
     return new Promise((resolve, reject) => {
       queue.push({ fn, resolve, reject });
       void runNext();
     });
   };
+
+  enqueue.clear = () => {
+    queue.length = 0;
+  };
+
+  return enqueue;
 }
 
 const runWithPage = createSerialTaskQueue();
@@ -1831,6 +1838,60 @@ async function rebuildPage(reason = "timeout") {
   }
 }
 
+async function closeBrowserInstance(instance, { timeoutMs = BROWSER_CLOSE_TIMEOUT_MS } = {}) {
+  if (!instance) {
+    return;
+  }
+
+  const closeOperation = Promise.resolve().then(() => instance.close());
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    let timeoutId;
+
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Browser close timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
+    });
+
+    try {
+      await Promise.race([closeOperation, timeoutPromise]);
+    } catch (err) {
+      const message = typeof err?.message === "string" ? err.message : String(err);
+      console.warn("⚠️ Browser konnte nicht geschlossen werden:", message);
+      const proc = typeof instance.process === "function" ? instance.process() : null;
+      if (proc && !proc.killed) {
+        try {
+          proc.kill("SIGKILL");
+          console.warn("⚠️ Browser-Prozess wurde hart beendet.");
+        } catch (killErr) {
+          console.warn("⚠️ Browser-Prozess konnte nicht hart beendet werden:", killErr.message);
+        }
+      }
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  } else {
+    try {
+      await closeOperation;
+    } catch (err) {
+      const message = typeof err?.message === "string" ? err.message : String(err);
+      console.warn("⚠️ Browser konnte nicht geschlossen werden:", message);
+      const proc = typeof instance.process === "function" ? instance.process() : null;
+      if (proc && !proc.killed) {
+        try {
+          proc.kill("SIGKILL");
+          console.warn("⚠️ Browser-Prozess wurde hart beendet.");
+        } catch (killErr) {
+          console.warn("⚠️ Browser-Prozess konnte nicht hart beendet werden:", killErr.message);
+        }
+      }
+    }
+  }
+}
+
 async function attemptPageRecovery(reason = "timeout", { forceBrowserRestart = false } = {}) {
   if (pageRecoveryInProgress) {
     return;
@@ -1842,11 +1903,10 @@ async function attemptPageRecovery(reason = "timeout", { forceBrowserRestart = f
     }
 
     if (browser) {
-      try {
-        await browser.close();
-      } catch (closeErr) {
-        console.warn("⚠️ Browser konnte nicht geschlossen werden:", closeErr.message);
+      if (typeof runWithPage.clear === "function") {
+        runWithPage.clear();
       }
+      await closeBrowserInstance(browser);
     }
 
     browser = null;
@@ -1878,10 +1938,56 @@ let scrapeTimer = null;
 let scrapeLoopActive = false;
 
 // ===== Helpers =====
-function cleanNum(str) {
-  if (!str) return null;
-  const s = str.replace(/[^\d\.\-]/g, "");
-  return s ? Number(s) : null;
+function cleanNum(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const str = String(value).trim();
+  if (!str) {
+    return null;
+  }
+
+  const normalized = str.replace(/,/g, ".").replace(/[^0-9+\-.]/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractHexFromDisplay(raw) {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+
+  const text = String(raw).trim();
+  if (!text) {
+    return null;
+  }
+
+  const cleaned = text
+    .replace(/\b(hex|icao|icao24|mode\s*s)\b\s*:?/gi, " ")
+    .replace(/[^0-9a-f]/gi, " ")
+    .trim();
+
+  const parts = cleaned.split(/\s+/);
+  for (const part of parts) {
+    if (/^[0-9a-f]{6}$/i.test(part)) {
+      return part.toLowerCase();
+    }
+  }
+
+  if (/^[0-9a-f]{6}$/i.test(text)) {
+    return text.toLowerCase();
+  }
+
+  return null;
 }
 
 function parsePos(raw) {
@@ -1891,7 +1997,13 @@ function parsePos(raw) {
 }
 
 function parseLastSeen(raw) {
-  if (!raw) return null;
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : null;
+  }
 
   const text = String(raw).trim().toLowerCase();
   if (!text) return null;
@@ -2236,33 +2348,147 @@ async function scrapeOnce() {
   if (!page) return;
 
   const data = await runPageOperation(() => page.evaluate(() => {
-    const get = (sel) => document.querySelector(sel)?.textContent.trim() || null;
-    const hexRaw = get("#selected_icao") || "";
-    const hex = hexRaw.replace(/Hex:\s*/i, "").split(/\s+/)[0] || null;
+    const textContent = selector => {
+      const element = document.querySelector(selector);
+      if (!element) {
+        return null;
+      }
+      const value = element.textContent;
+      return typeof value === "string" ? value.trim() : null;
+    };
 
-    const lastSeen = get("#selected_seen_pos") || get("#selected_seen");
+    const findSelectedAircraft = () => {
+      const candidates = [
+        window?.selectedAircraft,
+        window?.selectedAc,
+        window?.ac,
+        window?.selected
+      ];
+
+      for (const candidate of candidates) {
+        if (candidate && typeof candidate === "object") {
+          return candidate;
+        }
+      }
+      return null;
+    };
+
+    const readLastSeen = (selectedCandidate) => {
+      const seenElements = [
+        document.querySelector("#selected_seen_pos"),
+        document.querySelector("#selected_seen"),
+        document.querySelector('[data-testid="selected-seen"]'),
+        document.querySelector('[data-testid="selectedSeen"]')
+      ];
+
+      let lastSeenText = null;
+      let lastSeenSeconds = null;
+
+      for (const element of seenElements) {
+        if (!element) {
+          continue;
+        }
+
+        if (lastSeenSeconds === null) {
+          const candidates = [
+            element.getAttribute("data-seconds"),
+            element.getAttribute("data-last-seconds"),
+            element.getAttribute("data-lastseen"),
+            element.dataset?.seconds,
+            element.dataset?.lastSeen,
+            element.dataset?.lastseen,
+            element.dataset?.lastSeconds
+          ];
+
+          for (const candidate of candidates) {
+            if (candidate === undefined || candidate === null || candidate === "") {
+              continue;
+            }
+            const parsed = Number(candidate);
+            if (Number.isFinite(parsed)) {
+              lastSeenSeconds = parsed;
+              break;
+            }
+          }
+        }
+
+        if (!lastSeenText) {
+          const value = element.textContent;
+          if (typeof value === "string" && value.trim()) {
+            lastSeenText = value.trim();
+          }
+        }
+
+        if (lastSeenText && lastSeenSeconds !== null) {
+          break;
+        }
+      }
+
+      let selectedSeconds = null;
+      if (selectedCandidate && typeof selectedCandidate === "object") {
+        const candidates = [
+          selectedCandidate.seen_pos,
+          selectedCandidate.seenPos,
+          selectedCandidate.seen,
+          selectedCandidate.lastSeen,
+          selectedCandidate.lastSeenSeconds
+        ];
+
+        for (const candidate of candidates) {
+          if (typeof candidate === "number" && Number.isFinite(candidate)) {
+            selectedSeconds = candidate;
+            break;
+          }
+        }
+      }
+
+      return {
+        text: lastSeenText,
+        seconds: lastSeenSeconds,
+        selectedSeconds
+      };
+    };
+
+    const selectedCandidate = findSelectedAircraft();
+    let selectedHex = null;
+    if (selectedCandidate && typeof selectedCandidate === "object") {
+      const hexKeys = ["icao", "icao24", "hex", "icaoHex"];
+      for (const key of hexKeys) {
+        const value = selectedCandidate[key];
+        if (value) {
+          selectedHex = value;
+          break;
+        }
+      }
+    }
+
+    const lastSeenInfo = readLastSeen(selectedCandidate);
 
     return {
       time: new Date().toISOString(),
-      callsign: get("#selected_callsign"),
-      hex,
-      reg: get("#selected_registration"),
-      type: get("#selected_icaotype"),
-      gs: get("#selected_speed1"),
-      alt: get("#selected_altitude1"),
-      pos: get("#selected_position"),
-      vr: get("#selected_vert_rate"),
-      hdg: get("#selected_track1"),
-      lastSeen // ggf. anderer Selektor
+      hexRaw: textContent("#selected_icao"),
+      selectedHex,
+      callsign: textContent("#selected_callsign"),
+      reg: textContent("#selected_registration"),
+      type: textContent("#selected_icaotype"),
+      gs: textContent("#selected_speed1"),
+      alt: textContent("#selected_altitude1"),
+      pos: textContent("#selected_position"),
+      vr: textContent("#selected_vert_rate"),
+      hdg: textContent("#selected_track1"),
+      lastSeenText: lastSeenInfo.text,
+      lastSeenSeconds: lastSeenInfo.seconds,
+      lastSeenSelectedSeconds: lastSeenInfo.selectedSeconds
     };
   }));
 
-  if (!data.hex) return;
+  const hex = extractHexFromDisplay(data.hexRaw) || extractHexFromDisplay(data.selectedHex);
+  if (!hex) return;
 
   const { lat, lon } = parsePos(data.pos);
   const record = {
     time: data.time,
-    hex: data.hex.toLowerCase(),
+    hex,
     callsign: data.callsign,
     reg: data.reg,
     type: data.type,
@@ -2272,8 +2498,16 @@ async function scrapeOnce() {
     hdg: cleanNum(data.hdg),
     lat,
     lon,
-    lastSeen: parseLastSeen(data.lastSeen)
+    lastSeen: null
   };
+
+  if (Number.isFinite(data.lastSeenSeconds)) {
+    record.lastSeen = data.lastSeenSeconds;
+  } else if (Number.isFinite(data.lastSeenSelectedSeconds)) {
+    record.lastSeen = data.lastSeenSelectedSeconds;
+  } else {
+    record.lastSeen = parseLastSeen(data.lastSeenText);
+  }
 
   if (record.lastSeen === null) {
     console.warn("⚠️ lastSeen konnte nicht ermittelt werden für", record.hex);
