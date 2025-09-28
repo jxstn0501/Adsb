@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-28T06:48:17.727Z",
+  "time": "2025-09-28T10:14:14.074Z",
   "hex": "3c658e",
   "callsign": "DLH811",
   "reg": "D-AILN",
   "type": "A319",
-  "gs": 435,
-  "alt": 36025,
-  "vr": 64,
-  "hdg": 204.3,
-  "lat": 52.141,
-  "lon": 10.838,
-  "lastSeen": 0
+  "gs": 1,
+  "alt": null,
+  "vr": 0,
+  "hdg": null,
+  "lat": 50.037,
+  "lon": 8.524,
+  "lastSeen": 9780
 }
