@@ -753,14 +753,6 @@
       return { lat, lon };
     }
 
-    function getDeviceLocationKey(precision = 4) {
-      const loc = getValidDeviceLocation();
-      if (!loc) {
-        return "";
-      }
-      return `${loc.lat.toFixed(precision)}|${loc.lon.toFixed(precision)}`;
-    }
-
     function refreshFlightDistance() {
       if (typeof updateDashboardFlightMetrics !== "function") {
         return;
@@ -768,9 +760,10 @@
       updateDashboardFlightMetrics(latestTelemetry, currentEvents);
     }
 
-    function refreshAdsbExchangeFrames() {
-      updateDashboardMapWithLatest(latestTelemetry, { locationUpdate: true });
-      updateStandaloneMapFrame();
+    function refreshAdsbExchangeFrames(options = {}) {
+      const force = options && options.force === true;
+      updateDashboardMapWithLatest(latestTelemetry, { force });
+      updateStandaloneMapFrame({ force });
     }
 
     function buildAdsbExchangeUrl(hex) {
@@ -779,33 +772,22 @@
         return "";
       }
 
-      const location = getValidDeviceLocation();
-
       try {
         const url = new URL("https://globe.adsbexchange.com/");
         url.searchParams.set("icao", normalized);
         url.searchParams.set("hideSidebar", "1");
         url.searchParams.set("hideButtons", "1");
-        if (location) {
-          url.searchParams.set("lat", location.lat.toFixed(5));
-          url.searchParams.set("lon", location.lon.toFixed(5));
-          url.searchParams.set("zoom", String(ADSB_DEFAULT_ZOOM));
-        }
+        url.searchParams.set("zoom", String(ADSB_DEFAULT_ZOOM));
         return url.toString();
       } catch (err) {
         console.warn("[Map] ADS-B URL konnte nicht erstellt werden:", err);
         const base = `${ADSB_BASE_URL}${encodeURIComponent(normalized)}`;
-        if (location) {
-          const params = new URLSearchParams({
-            lat: location.lat.toFixed(5),
-            lon: location.lon.toFixed(5),
-            zoom: String(ADSB_DEFAULT_ZOOM),
-            hideSidebar: "1",
-            hideButtons: "1"
-          });
-          return `${base}&${params.toString()}`;
-        }
-        return `${base}&hideSidebar=1&hideButtons=1`;
+        const params = new URLSearchParams({
+          zoom: String(ADSB_DEFAULT_ZOOM),
+          hideSidebar: "1",
+          hideButtons: "1"
+        });
+        return `${base}&${params.toString()}`;
       }
     }
 
@@ -1724,6 +1706,7 @@
       if (!normalized) {
         return;
       }
+      const previousHex = currentHex;
       currentHex = normalized;
       const input = document.getElementById("hexInput");
       if (input) {
@@ -1739,6 +1722,10 @@
         currentCallsign = "";
       }
       updateHeaderAircraftLabel();
+      const shouldForceRefresh = options && options.forceRefresh === true;
+      if (previousHex !== normalized || shouldForceRefresh) {
+        refreshAdsbExchangeFrames({ force: true });
+      }
     }
 
     function setHexStatus(message, type = "") {
@@ -1805,8 +1792,7 @@
         return;
       }
 
-      const locationKey = getDeviceLocationKey();
-      const configKey = `${hex}|${locationKey}`;
+      const configKey = hex;
       if (!options.force && mapViewCurrentConfigKey === configKey) {
         return;
       }
@@ -2395,8 +2381,7 @@
 
       frame.classList.remove("hidden");
 
-      const locationKey = getDeviceLocationKey();
-      const configKey = `${normalizedHex}|${locationKey}`;
+      const configKey = normalizedHex;
 
       if (!options.force && dashboardMapCurrentConfigKey === configKey) {
         return;
@@ -4238,7 +4223,7 @@
           throw new Error(message || `Serverantwort ${response.status}`);
         }
 
-        setCurrentHex(hex, { callsign: "" });
+        setCurrentHex(hex, { callsign: "", forceRefresh: true });
         const latest = await updateLatest();
         const aircraftName = getAircraftEntry(hex)?.name || "";
         const defaultMessage = `Neues Ziel gesetzt: ${hex}`;

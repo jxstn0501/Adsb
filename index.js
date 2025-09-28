@@ -1961,6 +1961,29 @@ function cleanNum(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function pickFirstNumber(...values) {
+  for (const value of values) {
+    const parsed = cleanNum(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function pickFirstString(...values) {
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return "";
+}
+
 function extractHexFromDisplay(raw) {
   if (raw === null || raw === undefined) {
     return null;
@@ -2464,6 +2487,131 @@ async function scrapeOnce() {
 
     const lastSeenInfo = readLastSeen(selectedCandidate);
 
+    const toCandidateNumber = (value) => {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      if (typeof value === "number") {
+        return Number.isFinite(value) ? value : null;
+      }
+      if (typeof value === "string") {
+        const normalized = value.trim().replace(/,/g, ".").replace(/[^0-9+\-.]/g, "");
+        if (!normalized) {
+          return null;
+        }
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    const pickCandidateNumber = (candidate, keys) => {
+      if (!candidate || typeof candidate !== "object") {
+        return null;
+      }
+      for (const key of keys) {
+        if (!key || !(key in candidate)) {
+          continue;
+        }
+        const value = toCandidateNumber(candidate[key]);
+        if (value !== null) {
+          return value;
+        }
+      }
+      return null;
+    };
+
+    const pickCandidateString = (candidate, keys) => {
+      if (!candidate || typeof candidate !== "object") {
+        return "";
+      }
+      for (const key of keys) {
+        if (!key || !(key in candidate)) {
+          continue;
+        }
+        const value = candidate[key];
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed) {
+            return trimmed;
+          }
+        }
+      }
+      return "";
+    };
+
+    const candidateData = {
+      callsign: pickCandidateString(selectedCandidate, [
+        "callsign",
+        "flight",
+        "flt",
+        "identifier"
+      ]),
+      reg: pickCandidateString(selectedCandidate, [
+        "registration",
+        "reg",
+        "r"
+      ]),
+      type: pickCandidateString(selectedCandidate, [
+        "icaoType",
+        "icaotype",
+        "type",
+        "aircraft",
+        "aircraftType"
+      ]),
+      gs: pickCandidateNumber(selectedCandidate, [
+        "gs",
+        "speed",
+        "spd",
+        "gndspd",
+        "groundspeed",
+        "velocity",
+        "vel"
+      ]),
+      alt: pickCandidateNumber(selectedCandidate, [
+        "alt_baro",
+        "baro_altitude",
+        "altitude",
+        "alt",
+        "geom_altitude",
+        "geomAlt",
+        "geoAltitude"
+      ]),
+      vr: pickCandidateNumber(selectedCandidate, [
+        "baro_rate",
+        "vert_rate",
+        "vertical_rate",
+        "rateOfClimb",
+        "roc",
+        "rocd",
+        "rate"
+      ]),
+      hdg: pickCandidateNumber(selectedCandidate, [
+        "track",
+        "heading",
+        "hdg",
+        "trk",
+        "course"
+      ]),
+      lat: pickCandidateNumber(selectedCandidate, [
+        "lat",
+        "latitude"
+      ]),
+      lon: pickCandidateNumber(selectedCandidate, [
+        "lon",
+        "longitude",
+        "lng"
+      ]),
+      lastSeen: pickCandidateNumber(selectedCandidate, [
+        "seen",
+        "lastSeen",
+        "seen_pos",
+        "seenPos",
+        "lastSeenSeconds",
+        "lastSeenSec"
+      ])
+    };
+
     return {
       time: new Date().toISOString(),
       hexRaw: textContent("#selected_icao"),
@@ -2478,34 +2626,52 @@ async function scrapeOnce() {
       hdg: textContent("#selected_track1"),
       lastSeenText: lastSeenInfo.text,
       lastSeenSeconds: lastSeenInfo.seconds,
-      lastSeenSelectedSeconds: lastSeenInfo.selectedSeconds
+      lastSeenSelectedSeconds: lastSeenInfo.selectedSeconds,
+      candidate: candidateData
     };
   }));
 
   const hex = extractHexFromDisplay(data.hexRaw) || extractHexFromDisplay(data.selectedHex);
   if (!hex) return;
 
-  const { lat, lon } = parsePos(data.pos);
+  const candidate = data && typeof data.candidate === "object" && data.candidate !== null
+    ? data.candidate
+    : {};
+
+  const coordsFromText = parsePos(data.pos);
+  const lat = pickFirstNumber(coordsFromText.lat, candidate.lat);
+  const lon = pickFirstNumber(coordsFromText.lon, candidate.lon);
+
   const record = {
     time: data.time,
     hex,
-    callsign: data.callsign,
-    reg: data.reg,
-    type: data.type,
-    gs: cleanNum(data.gs),
-    alt: cleanNum(data.alt),
-    vr: cleanNum(data.vr),
-    hdg: cleanNum(data.hdg),
+    callsign: pickFirstString(data.callsign, candidate.callsign),
+    reg: pickFirstString(data.reg, candidate.reg),
+    type: pickFirstString(data.type, candidate.type),
+    gs: pickFirstNumber(data.gs, candidate.gs),
+    alt: pickFirstNumber(data.alt, candidate.alt),
+    vr: pickFirstNumber(data.vr, candidate.vr),
+    hdg: pickFirstNumber(data.hdg, candidate.hdg),
     lat,
     lon,
     lastSeen: null
   };
 
-  if (Number.isFinite(data.lastSeenSeconds)) {
-    record.lastSeen = data.lastSeenSeconds;
-  } else if (Number.isFinite(data.lastSeenSelectedSeconds)) {
-    record.lastSeen = data.lastSeenSelectedSeconds;
-  } else {
+  const lastSeenCandidates = [
+    data.lastSeenSeconds,
+    data.lastSeenSelectedSeconds,
+    candidate.lastSeen
+  ];
+
+  for (const value of lastSeenCandidates) {
+    const parsed = cleanNum(value);
+    if (parsed !== null) {
+      record.lastSeen = parsed;
+      break;
+    }
+  }
+
+  if (record.lastSeen === null) {
     record.lastSeen = parseLastSeen(data.lastSeenText);
   }
 
