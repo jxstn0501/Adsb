@@ -73,6 +73,10 @@ const OSM_CACHE_COORD_PRECISION = 3;
 const OSM_DEFAULT_LANGUAGE = "de,en";
 const OSM_USER_AGENT = "HeliTracker/1.0 (+https://helitracker.local)";
 
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+const OSM_FETCH_TIMEOUT_MS = 10_000;
+const HISTORY_FETCH_TIMEOUT_MS = 20_000;
+
 const DEFAULT_CONFIG = {
   altitudeThresholdFt: 300,
   speedThresholdKt: 40,
@@ -85,6 +89,95 @@ const DEFAULT_CONFIG = {
 };
 
 let config = { ...DEFAULT_CONFIG };
+
+function isReadOnlyFsError(err) {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+
+  return ["EROFS", "EACCES", "EPERM"].includes(err.code);
+}
+
+function handleReadOnlyWriteError(fileLabel, err) {
+  if (!isReadOnlyFsError(err)) {
+    return null;
+  }
+
+  const message = `${fileLabel} konnte nicht gespeichert werden, da das Dateisystem schreibgeschützt ist.`;
+  console.error(`❌ ${message}`, err.message);
+  const error = new Error(message);
+  error.statusCode = 500;
+  error.cause = err;
+  return error;
+}
+
+function combineAbortSignals(signalA, signalB) {
+  if (!signalA) {
+    return signalB;
+  }
+  if (!signalB) {
+    return signalA;
+  }
+
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+    try {
+      return AbortSignal.any([signalA, signalB]);
+    } catch (err) {
+      console.warn("⚠️ AbortSignal.any schlug fehl, verwende Fallback:", err.message);
+    }
+  }
+
+  const controller = new AbortController();
+
+  const forwardAbort = (signal) => {
+    if (!signal) {
+      return;
+    }
+
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return;
+    }
+
+    signal.addEventListener("abort", () => {
+      if (!controller.signal.aborted) {
+        controller.abort(signal.reason);
+      }
+    }, { once: true });
+  };
+
+  forwardAbort(signalA);
+  forwardAbort(signalB);
+
+  return controller.signal;
+}
+
+async function fetchWithTimeout(resource, options = {}) {
+  const { timeout = DEFAULT_FETCH_TIMEOUT_MS, signal, ...rest } = options;
+
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return fetch(resource, { ...rest, signal });
+  }
+
+  const timeoutController = new AbortController();
+  let didTimeout = false;
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    timeoutController.abort();
+  }, timeout);
+
+  try {
+    const combinedSignal = combineAbortSignals(signal, timeoutController.signal);
+    return await fetch(resource, { ...rest, signal: combinedSignal });
+  } catch (err) {
+    if (didTimeout && err && err.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeout} ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // ===== Places storage =====
 function sanitizePlaceEntry(place) {
@@ -131,22 +224,30 @@ async function loadPlacesFromDisk() {
       console.warn("⚠️ places.json enthält kein Array. Bestehende Werte bleiben erhalten.");
     }
   } catch (err) {
+    let resetPlaces = false;
+
     if (err.code === "ENOENT") {
-      try {
-        await fsp.writeFile(placesPath, JSON.stringify([], null, 2));
-        places = [];
-        try {
-          await recalculateEventPlacesForAllEvents();
-        } catch (recalcErr) {
-          console.error("⚠️ Events konnten nach Erstellen der Orte-Datei nicht neu berechnet werden:", recalcErr.message);
-        }
-      } catch (writeErr) {
-        console.error("❌ places.json konnte nicht erstellt werden:", writeErr.message);
-      }
+      console.warn("ℹ️ places.json nicht gefunden. Verwende leere Ortsliste.");
+      places = [];
+      resetPlaces = true;
     } else if (err.name === "SyntaxError") {
       console.error("❌ Ungültiges JSON in places.json:", err.message);
+      places = [];
+      resetPlaces = true;
     } else {
       console.error("❌ places.json konnte nicht gelesen werden:", err.message);
+      if (isReadOnlyFsError(err)) {
+        places = [];
+        resetPlaces = true;
+      }
+    }
+
+    if (resetPlaces) {
+      try {
+        await recalculateEventPlacesForAllEvents();
+      } catch (recalcErr) {
+        console.error("⚠️ Events konnten nach Erstellen der Orts-Defaults nicht neu berechnet werden:", recalcErr.message);
+      }
     }
   }
 }
@@ -165,8 +266,20 @@ async function savePlaces(list) {
   const normalizedList = list.map(sanitizePlaceEntry);
   const serialized = JSON.stringify(normalizedList, null, 2);
   const parsed = JSON.parse(serialized);
-  places = parsed;
-  await fsp.writeFile(placesPath, serialized);
+
+  try {
+    await fsp.writeFile(placesPath, serialized);
+    places = parsed;
+  } catch (err) {
+    const mappedError = handleReadOnlyWriteError("places.json", err);
+    if (mappedError) {
+      throw mappedError;
+    }
+
+    console.error("❌ places.json konnte nicht gespeichert werden:", err.message);
+    throw err;
+  }
+
   return getPlaces();
 }
 
@@ -257,16 +370,16 @@ async function loadAircraftFromDisk() {
     aircraftProfiles = sanitizeAircraftList(parsed);
   } catch (err) {
     if (err.code === "ENOENT") {
-      try {
-        await fsp.writeFile(aircraftPath, JSON.stringify([], null, 2));
-      } catch (writeErr) {
-        console.error("❌ aircraft.json konnte nicht erstellt werden:", writeErr.message);
-      }
+      console.warn("ℹ️ aircraft.json nicht gefunden. Verwende leere Flugzeugliste.");
       aircraftProfiles = [];
     } else if (err.name === "SyntaxError") {
       console.error("❌ Ungültiges JSON in aircraft.json:", err.message);
+      aircraftProfiles = [];
     } else {
       console.error("❌ aircraft.json konnte nicht gelesen werden:", err.message);
+      if (isReadOnlyFsError(err)) {
+        aircraftProfiles = [];
+      }
     }
   }
 }
@@ -295,8 +408,20 @@ async function saveAircraft(list) {
   const sanitized = sanitizeAircraftList(list);
   const serialized = JSON.stringify(sanitized, null, 2);
   const parsed = JSON.parse(serialized);
-  aircraftProfiles = parsed;
-  await fsp.writeFile(aircraftPath, serialized);
+
+  try {
+    await fsp.writeFile(aircraftPath, serialized);
+    aircraftProfiles = parsed;
+  } catch (err) {
+    const mappedError = handleReadOnlyWriteError("aircraft.json", err);
+    if (mappedError) {
+      throw mappedError;
+    }
+
+    console.error("❌ aircraft.json konnte nicht gespeichert werden:", err.message);
+    throw err;
+  }
+
   return getAircraftList();
 }
 
@@ -517,11 +642,7 @@ async function loadConfigFromDisk() {
 
     if (!raw.trim()) {
       config = { ...DEFAULT_CONFIG };
-      try {
-        await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
-      } catch (writeErr) {
-        console.error("❌ config.json konnte nicht erstellt werden:", writeErr.message);
-      }
+      console.warn("ℹ️ config.json ist leer. Verwende Standardwerte.");
       await handleConfigRadiusChange(previousConfig, config);
       return;
     }
@@ -531,12 +652,8 @@ async function loadConfigFromDisk() {
     await handleConfigRadiusChange(previousConfig, config);
   } catch (err) {
     if (err.code === "ENOENT") {
-      try {
-        await fsp.writeFile(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
-      } catch (writeErr) {
-        console.error("❌ config.json konnte nicht erstellt werden:", writeErr.message);
-      }
       config = { ...DEFAULT_CONFIG };
+      console.warn("ℹ️ config.json nicht gefunden. Verwende Standardwerte.");
       await handleConfigRadiusChange(previousConfig, config);
     } else if (err.name === "SyntaxError") {
       console.error("❌ Ungültiges JSON in config.json:", err.message);
@@ -544,17 +661,33 @@ async function loadConfigFromDisk() {
       await handleConfigRadiusChange(previousConfig, config);
     } else {
       console.error("❌ config.json konnte nicht gelesen werden:", err.message);
-      config = { ...DEFAULT_CONFIG };
-      await handleConfigRadiusChange(previousConfig, config);
+      if (isReadOnlyFsError(err)) {
+        config = { ...DEFAULT_CONFIG };
+        await handleConfigRadiusChange(previousConfig, config);
+      }
     }
   }
 }
 
 async function saveConfig(newConfig) {
   const previousConfig = { ...config };
-  config = normalizeConfig(newConfig);
-  await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
-  await handleConfigRadiusChange(previousConfig, config);
+  const normalized = normalizeConfig(newConfig);
+  const serialized = JSON.stringify(normalized, null, 2);
+
+  try {
+    await fsp.writeFile(configPath, serialized);
+    config = normalized;
+    await handleConfigRadiusChange(previousConfig, config);
+  } catch (err) {
+    const mappedError = handleReadOnlyWriteError("config.json", err);
+    if (mappedError) {
+      throw mappedError;
+    }
+
+    console.error("❌ config.json konnte nicht gespeichert werden:", err.message);
+    throw err;
+  }
+
   return getConfig();
 }
 
@@ -852,11 +985,12 @@ async function fetchNearestOsmPlace(lat, lon) {
   });
 
   try {
-    const response = await fetch(`${OSM_REVERSE_URL}?${params.toString()}`, {
+    const response = await fetchWithTimeout(`${OSM_REVERSE_URL}?${params.toString()}`, {
       headers: {
         "User-Agent": OSM_USER_AGENT,
         "Accept-Language": OSM_DEFAULT_LANGUAGE
-      }
+      },
+      timeout: OSM_FETCH_TIMEOUT_MS
     });
 
     if (!response.ok) {
@@ -1621,8 +1755,9 @@ async function downloadHistoryForHex(hex, days = 14) {
     while (true) {
       let response;
       try {
-        response = await fetch(historyUrl, {
-          headers: buildHistoryRequestHeaders()
+        response = await fetchWithTimeout(historyUrl, {
+          headers: buildHistoryRequestHeaders(),
+          timeout: HISTORY_FETCH_TIMEOUT_MS
         });
         performedRequestForDay = true;
       } catch (err) {
@@ -3969,7 +4104,24 @@ async function handleRequest(req, res) {
   return;
 }
 
-const server = http.createServer((req, res) => {
+const app = http.createServer((req, res) => {
+  const method = req.method || "GET";
+  const requestUrl = req.url || "";
+  const startTime = Date.now();
+  console.log(`➡️  ${method} ${requestUrl}`);
+
+  res.on("finish", () => {
+    const duration = Date.now() - startTime;
+    console.log(`⬅️  ${method} ${requestUrl} ${res.statusCode} (${duration} ms)`);
+  });
+
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      const duration = Date.now() - startTime;
+      console.warn(`⚠️ Verbindung vorzeitig beendet: ${method} ${requestUrl} (${duration} ms)`);
+    }
+  });
+
   Promise.resolve(handleRequest(req, res)).catch(err => {
     console.error("❌ Unerwarteter Fehler:", err.message);
     if (!res.writableEnded) {
@@ -3987,8 +4139,10 @@ async function bootstrap() {
     console.error("❌ Initialisierung fehlgeschlagen:", err.message);
   }
 
-  server.listen(3000, () => {
-    console.log("✅ Server läuft auf Port 3000");
+  const envPort = Number.parseInt(process.env.PORT, 10);
+  const port = Number.isInteger(envPort) && envPort > 0 ? envPort : 3000;
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`🚀 Server läuft auf Port ${port}`);
     startBrowser().catch(err => {
       console.error("❌ Starten des Browsers fehlgeschlagen:", err.message);
     });
