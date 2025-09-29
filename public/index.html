@@ -1613,7 +1613,7 @@
       }
     }
 
-    function cloneEventForNotification(rawEvent) {
+    function cloneEvent(rawEvent) {
       if (!rawEvent || typeof rawEvent !== "object") {
         return null;
       }
@@ -1626,20 +1626,21 @@
       return clone;
     }
 
+    function cloneEventForNotification(rawEvent) {
+      return cloneEvent(rawEvent);
+    }
+
     function processIncomingEvent(rawEvent) {
       if (!rawEvent || typeof rawEvent !== "object") {
         return;
       }
 
-      const type = getEventTypeLabel(rawEvent);
-      if (!NOTIFICATION_EVENT_TYPES.has(type)) {
-        return;
-      }
-
-      const event = cloneEventForNotification(rawEvent);
+      const event = cloneEvent(rawEvent);
       if (!event) {
         return;
       }
+
+      const eventTypeLabel = getEventTypeLabel(event);
 
       currentEvents = Array.isArray(currentEvents) ? [...currentEvents] : [];
       const existingIndex = currentEvents.findIndex(item => item && item.id === event.id);
@@ -1650,6 +1651,10 @@
       }
 
       currentEventGroups = groupEventsByAircraft(currentEvents);
+
+      if (activeEventDetail && activeEventDetail.id === event.id) {
+        activeEventDetail = cloneEvent(event);
+      }
 
       if (activeView === "events") {
         if (eventDetailReturnState.mode === EVENTS_VIEW_GROUP) {
@@ -1670,7 +1675,9 @@
         renderEventsManagementTable(currentEvents);
       }
 
-      void showNotificationForEvent(event);
+      if (NOTIFICATION_EVENT_TYPES.has(eventTypeLabel)) {
+        void showNotificationForEvent(event);
+      }
     }
 
     function updateHeaderAircraftLabel() {
