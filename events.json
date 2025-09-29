@@ -513,5 +513,25 @@
       "osmId": "9849780503",
       "osmType": "node"
     }
+  },
+  {
+    "time": "2025-09-29T08:05:40.563Z",
+    "type": "landing",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.089,
+    "lon": 13.407,
+    "alt": -200,
+    "gs": 9,
+    "lastSeen": 63,
+    "id": "26",
+    "place": {
+      "id": "mfqxpgb7",
+      "name": "HGW Uni",
+      "type": "Base",
+      "source": "user",
+      "lat": 54.089087,
+      "lon": 13.408101
+    }
   }
 ]
