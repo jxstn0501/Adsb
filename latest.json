@@ -1,14 +1,14 @@
 {
-  "time": "2025-09-29T10:51:34.474Z",
-  "hex": "3e0fe9",
-  "callsign": "CHX47",
-  "reg": "D-HXFL",
-  "type": "EC45",
-  "gs": 9,
-  "alt": -200,
-  "vr": -320,
-  "hdg": 144.5,
-  "lat": 54.089,
-  "lon": 13.408,
-  "lastSeen": 6240
+  "time": "2025-09-29T12:34:06.985Z",
+  "hex": "3ed849",
+  "callsign": "DKWWF",
+  "reg": "D-KWWF",
+  "type": "DIMO",
+  "gs": 96,
+  "alt": 1700,
+  "vr": -288,
+  "hdg": null,
+  "lat": 50.298,
+  "lon": 8.361,
+  "lastSeen": 75600
 }
