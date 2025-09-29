@@ -92,27 +92,11 @@ deploymentTarget = "gce"
 [agent]
 expertMode = true
 
-[[ports]]
-localPort = 3000
 
 [[ports]]
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 32949
-
-[[ports]]
-localPort = 36001
-
-[[ports]]
-localPort = 41739
-
-[[ports]]
-localPort = 43425
-
-[[ports]]
-localPort = 44129
 
 [objectStorage]
 defaultBucketID = "replit-objstore-cda93f6d-7119-49ac-b7c1-53b888f03ade"
