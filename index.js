@@ -267,13 +267,17 @@ async function savePlaces(list) {
   const serialized = JSON.stringify(normalizedList, null, 2);
   const parsed = JSON.parse(serialized);
 
+  // Immer erst den In-Memory-Status aktualisieren.
+  places = parsed;
+
   try {
     await fsp.writeFile(placesPath, serialized);
-    places = parsed;
   } catch (err) {
-    const mappedError = handleReadOnlyWriteError("places.json", err);
-    if (mappedError) {
-      throw mappedError;
+    if (isReadOnlyFsError(err)) {
+      console.warn(
+        "⚠️ places.json nicht gespeichert (read-only). Weiter mit In-Memory-State.",
+      );
+      return getPlaces();
     }
 
     console.error("❌ places.json konnte nicht gespeichert werden:", err.message);
@@ -409,13 +413,17 @@ async function saveAircraft(list) {
   const serialized = JSON.stringify(sanitized, null, 2);
   const parsed = JSON.parse(serialized);
 
+  // Immer erst den In-Memory-Status aktualisieren.
+  aircraftProfiles = parsed;
+
   try {
     await fsp.writeFile(aircraftPath, serialized);
-    aircraftProfiles = parsed;
   } catch (err) {
-    const mappedError = handleReadOnlyWriteError("aircraft.json", err);
-    if (mappedError) {
-      throw mappedError;
+    if (isReadOnlyFsError(err)) {
+      console.warn(
+        "⚠️ aircraft.json nicht gespeichert (read-only). Weiter mit In-Memory-State.",
+      );
+      return getAircraftList();
     }
 
     console.error("❌ aircraft.json konnte nicht gespeichert werden:", err.message);
@@ -674,14 +682,19 @@ async function saveConfig(newConfig) {
   const normalized = normalizeConfig(newConfig);
   const serialized = JSON.stringify(normalized, null, 2);
 
+  // Immer erst den In-Memory-Status aktualisieren.
+  config = normalized;
+
+  await handleConfigRadiusChange(previousConfig, config);
+
   try {
     await fsp.writeFile(configPath, serialized);
-    config = normalized;
-    await handleConfigRadiusChange(previousConfig, config);
   } catch (err) {
-    const mappedError = handleReadOnlyWriteError("config.json", err);
-    if (mappedError) {
-      throw mappedError;
+    if (isReadOnlyFsError(err)) {
+      console.warn(
+        "⚠️ config.json nicht gespeichert (read-only). Weiter mit In-Memory-State.",
+      );
+      return getConfig();
     }
 
     console.error("❌ config.json konnte nicht gespeichert werden:", err.message);
