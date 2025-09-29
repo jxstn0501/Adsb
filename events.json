@@ -553,5 +553,30 @@
       "lat": 54.089087,
       "lon": 13.408101
     }
+  },
+  {
+    "time": "2025-09-29T10:06:04.886Z",
+    "type": "takeoff",
+    "hex": "3e0fe8",
+    "callsign": "CHX11",
+    "lat": 47.997,
+    "lon": 8.768,
+    "alt": 2975,
+    "gs": 96,
+    "lastSeen": 0,
+    "id": "28",
+    "place": {
+      "name": "Leimesäcker",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Leimesäcker, Wurmlingen, Verwaltungsgemeinschaft Tuttlingen, Landkreis Tuttlingen, Baden-Württemberg, 78573, Deutschland",
+      "lat": 47.997,
+      "lon": 8.768,
+      "city": "Wurmlingen",
+      "country": "Deutschland",
+      "state": "Baden-Württemberg",
+      "osmId": "3671963818",
+      "osmType": "node"
+    }
   }
 ]
