@@ -441,6 +441,8 @@
     let eventsOverviewScrollTop = 0;
     const eventGroupScrollPositions = new Map();
     const EVENT_STREAM_RETRY_MS = 5000;
+    const FALLBACK_POLLING_INTERVAL_MS = 10000;
+    const MAX_SSE_RETRY_ATTEMPTS = 3;
     const DEFAULT_NOTIFICATION_SETTINGS = {
       enabled: false,
       notifyOnTakeoff: true,
@@ -455,6 +457,8 @@
     let serviceWorkerReadyPromise = null;
     let eventStreamSource = null;
     let eventStreamReconnectTimer = null;
+    let sseRetryAttempts = 0;
+    let fallbackPollingTimer = null;
     let lastReceivedEventId = null;
     let activeEventDetail = null;
     let debugNotificationTimer = null;
@@ -1434,6 +1438,9 @@
         eventStreamSource = source;
 
         source.onopen = () => {
+          console.log("[Events] SSE-Verbindung erfolgreich hergestellt");
+          sseRetryAttempts = 0;
+          stopFallbackPolling();
           if (eventStreamReconnectTimer) {
             clearTimeout(eventStreamReconnectTimer);
             eventStreamReconnectTimer = null;
@@ -1459,18 +1466,79 @@
 
         source.onerror = err => {
           console.warn("[Events] Verbindung zum Server-Stream verloren:", err);
+          sseRetryAttempts++;
           try {
             source.close();
           } catch (closeErr) {
             console.warn("[Events] EventSource konnte nicht geschlossen werden:", closeErr);
           }
           eventStreamSource = null;
-          scheduleEventStreamReconnect();
+          
+          if (sseRetryAttempts >= MAX_SSE_RETRY_ATTEMPTS) {
+            console.warn(`[Events] Max SSE retry attempts (${MAX_SSE_RETRY_ATTEMPTS}) erreicht. Fallback auf Polling.`);
+            startFallbackPolling();
+          } else {
+            scheduleEventStreamReconnect();
+          }
         };
       } catch (err) {
         console.warn("[Events] Event Stream konnte nicht gestartet werden:", err);
+        sseRetryAttempts++;
         eventStreamSource = null;
-        scheduleEventStreamReconnect();
+        
+        if (sseRetryAttempts >= MAX_SSE_RETRY_ATTEMPTS) {
+          console.warn(`[Events] Max SSE retry attempts (${MAX_SSE_RETRY_ATTEMPTS}) erreicht. Fallback auf Polling.`);
+          startFallbackPolling();
+        } else {
+          scheduleEventStreamReconnect();
+        }
+      }
+    }
+
+    function startFallbackPolling() {
+      console.log("[Events] Starte Fallback-Polling für Event-Updates");
+      stopFallbackPolling();
+      
+      fallbackPollingTimer = setInterval(async () => {
+        try {
+          const response = await fetch("/events");
+          if (response.ok) {
+            const events = await response.json();
+            if (Array.isArray(events)) {
+              processPolledEvents(events);
+            }
+          } else {
+            console.warn("[Events] Polling fehlgeschlagen:", response.status);
+          }
+        } catch (err) {
+          console.warn("[Events] Polling error:", err);
+        }
+      }, FALLBACK_POLLING_INTERVAL_MS);
+    }
+    
+    function stopFallbackPolling() {
+      if (fallbackPollingTimer) {
+        clearInterval(fallbackPollingTimer);
+        fallbackPollingTimer = null;
+        console.log("[Events] Fallback-Polling gestoppt");
+      }
+    }
+    
+    function processPolledEvents(events) {
+      if (!Array.isArray(events) || events.length === 0) return;
+      
+      // Nur neue Events basierend auf lastReceivedEventId verarbeiten
+      const newEvents = events.filter(event => {
+        if (!event || !event.id) return false;
+        if (!lastReceivedEventId) return true;
+        return String(event.id) > String(lastReceivedEventId);
+      });
+      
+      for (const event of newEvents) {
+        processIncomingEvent(event);
+        if (event.id) {
+          lastReceivedEventId = String(event.id);
+        }
       }
     }
 

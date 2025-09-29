@@ -1134,10 +1134,17 @@ function handleEventStreamRequest(req, res) {
     return;
   }
 
+  const origin = req.headers.origin;
+  const isValidOrigin = !origin || isValidReplayOrigin(origin);
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
-    Connection: "keep-alive"
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": isValidOrigin ? (origin || "*") : "",
+    "Access-Control-Allow-Methods": "GET",
+    "Access-Control-Allow-Headers": "Cache-Control",
+    "X-Accel-Buffering": "no"
   });
 
   if (typeof res.flushHeaders === "function") {
