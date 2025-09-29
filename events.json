@@ -488,5 +488,30 @@
       "osmId": "3563509035",
       "osmType": "node"
     }
+  },
+  {
+    "time": "2025-09-29T07:54:17.949Z",
+    "type": "takeoff",
+    "hex": "3e0fe9",
+    "callsign": "CHX47",
+    "lat": 54.393,
+    "lon": 13.565,
+    "alt": 700,
+    "gs": 121,
+    "lastSeen": 0,
+    "id": "25",
+    "place": {
+      "name": "Hagen",
+      "type": "external",
+      "source": "osm",
+      "displayName": "Hagen, Zirkow, Mönchgut-Granitz, Vorpommern-Rügen, Mecklenburg-Vorpommern, 18528, Deutschland",
+      "lat": 54.393,
+      "lon": 13.565,
+      "city": "Zirkow",
+      "country": "Deutschland",
+      "state": "Mecklenburg-Vorpommern",
+      "osmId": "9849780503",
+      "osmType": "node"
+    }
   }
 ]
