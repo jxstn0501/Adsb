@@ -33,6 +33,7 @@ let aircraftProfiles = [];
 let eventPlaceRecalculationPromise = null;
 const eventStreamClients = new Set();
 const EVENT_STREAM_HEARTBEAT_INTERVAL_MS = 30_000;
+let broadcastRevision = 0;
 
 const EMBEDDED_ICON_192 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAAFtklEQVR4nO3dO28cVQCG4e/MXuzYDrHFLRFFihSIBpTCIEUpUBpqapS/QDpo6BD0/AUqChASAokCyiChICFEAw1VEJZjLoLYi/cyh2I8lkicyLMz6z0z3/u03pk9s953d3Zm9my4dXMUBZjKlj0AYJkIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANYIANb6yx7AaYRQb/kYmxnHgxY9rrrrT9mi/idVJR9AjNJkImnOB6zXk7Jeo0M6Np1IeT7fsiFI/cGj/x6jNBnPt+426A/SCDzpAGKUen3p6Yth7gdr/x9p/35s/MGOUdp6Kmhldb7lZ1Ppj72Tq45RGq5Iz1xK4BmyIH/9HjUeLz+CZAMIQZpOpa0ng956b0XDYbXlYyzW8dlHU33x8UTrG2HuV+uHxpZJhyPp9Tf6uvpK7/i+qtj5Ndf7b4+VPfApLMuk0YF05flMb75TcaNb5IN3x/rpx1zn1uZ/F21CKz4El/uLVfYbz2Ifs864TrtMKvvKTUlte1oRALAoBABrBABrBABrBABrBABrBABryZ4IcxejNJtprpNsJwlBD510qyLPmzmGX25PKucDCCBBMUr9fnEdUyrqxHOSfj+NCAggMTEWF4rt7UZ9+em09jtACMXFhM9eCtq+Xv2yjfL2330z087dqMGw3hO3XN/eblR/sPwICCAxMUqDowA++XBSe31ZTzrYl66+3NP29fnfUm5/PdOd2zOtb0j5rPawtLoWNCAAnKTcBXpis/7Of5YVQa2t11vP2rp0YTNobb2Zi9ea+kxRFwEkqvwQ3NR66j5p87xYTxPrSgmHQWGNAGCNAGCNAGCNAGCt80eByksAmjyTGY7Wt+wvdKO+zgcwGRcngkJo7vBdyKR/R8WX9tFunQ2gfHW++FzQS9uZVs8FxaaOX2fS+FDa3Ar/uy+0T+cDuHajp2s3FntVGQG0V2cDKMW42KkRefK3W+cD4EmKx+EwKKwRAKwRAKwRAKwRAKwRAKx1/jBojMUlEIs4Ehq4Hqj1Oh9ACGlNL4K0dDaAcvqN77+d6Yc7M62sNnst0GQsvfpaT5evZI1NXoWz1/kAfvk56qvPp9o43+xPJI0OpBdezHT5SnOzt+HsdTaA0nBFOn8hNP4bYf1BMd0I2q3zAcRYTOSUNzidRzhaZwrz2qAeDoPCGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAWiu+E1z+yEWV7+DOs0ydcZ32fsrbLeP7xPM8Hl3/3nPyAYQgDYfVf+iinAyrt8At7A+qT7xVbsNguJgxPe5+5/mxkPL2oaP7CkkHEII0m0q/3Y0aDqvNv5PnxU+Z3v87LmTOnhCkP/ei7u3E4/s6jXIbdnfO7qU1BOnwULq3EyvPYVTe/nDUzbmPwq2bo+Tf5Oq8DS/yn1Z39+Csn1CpPo7LlPQ7QCnVBz/VcT1K28Z7Fjq6ZwecDgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHAGgHA2n951kiCJu/6vQAAAABJRU5ErkJggg==",
@@ -466,9 +467,15 @@ async function cleanupAircraftArtifacts(normalizedHex, remainingAircraft = []) {
     return;
   }
 
+  let logsChanged = false;
+  let eventsChanged = false;
+  let latestChanged = false;
+  let targetChanged = false;
+
   const logFilePath = path.join(logsDir, `${normalizedHex}.jsonl`);
   try {
     await fsp.unlink(logFilePath);
+    logsChanged = true;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error(`⚠️ Log-Datei konnte nicht entfernt werden (${normalizedHex}):`, err.message);
@@ -478,14 +485,26 @@ async function cleanupAircraftArtifacts(normalizedHex, remainingAircraft = []) {
   const historyPath = path.join(historyLogsDir, normalizedHex);
   try {
     await fsp.rm(historyPath, { recursive: true, force: true });
+    logsChanged = true;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error(`⚠️ History-Verzeichnis konnte nicht entfernt werden (${normalizedHex}):`, err.message);
     }
   }
 
-  delete logCounts[normalizedHex];
-  delete lastLogRecords[normalizedHex];
+  if (Object.prototype.hasOwnProperty.call(logCounts, normalizedHex)) {
+    delete logCounts[normalizedHex];
+    logsChanged = true;
+  } else {
+    delete logCounts[normalizedHex];
+  }
+
+  if (Object.prototype.hasOwnProperty.call(lastLogRecords, normalizedHex)) {
+    delete lastLogRecords[normalizedHex];
+    logsChanged = true;
+  } else {
+    delete lastLogRecords[normalizedHex];
+  }
   historyDownloadQueues.delete(normalizedHex);
   historyDownloadsInFlight.delete(normalizedHex);
   historyExistingDaysCache.delete(normalizedHex);
@@ -495,11 +514,13 @@ async function cleanupAircraftArtifacts(normalizedHex, remainingAircraft = []) {
   events = events.filter(event => normalizeAircraftHex(event && event.hex) !== normalizedHex);
   if (events.length !== eventsBefore) {
     await persistEvents();
+    eventsChanged = true;
   }
 
   const latestHex = latestData && latestData.hex ? normalizeAircraftHex(latestData.hex) : "";
   if (latestHex === normalizedHex) {
     latestData = {};
+    latestChanged = true;
     try {
       await fsp.writeFile("latest.json", JSON.stringify(latestData, null, 2));
     } catch (err) {
@@ -513,6 +534,20 @@ async function cleanupAircraftArtifacts(normalizedHex, remainingAircraft = []) {
       : "";
     targetHex = fallbackEntry || "";
     await persistLastTargetHex(targetHex);
+    targetChanged = true;
+  }
+
+  if (logsChanged) {
+    broadcast({ scope: "logs", hex: normalizedHex, action: "cleanup" });
+  }
+  if (eventsChanged) {
+    broadcast({ scope: "events", action: "cleanup", hex: normalizedHex });
+  }
+  if (latestChanged) {
+    broadcast({ scope: "latest", hex: normalizedHex });
+  }
+  if (targetChanged) {
+    broadcast({ scope: "target", hex: targetHex || null });
   }
 }
 
@@ -1034,6 +1069,34 @@ function removeEventStreamClient(client) {
   }
 }
 
+function broadcast(change = {}) {
+  if (eventStreamClients.size === 0) {
+    return;
+  }
+
+  broadcastRevision += 1;
+
+  const payload = {
+    revision: broadcastRevision,
+    timestamp: new Date().toISOString()
+  };
+
+  if (change && typeof change === "object" && Object.keys(change).length > 0) {
+    payload.change = change;
+  }
+
+  const chunk = `event: broadcast\ndata: ${JSON.stringify(payload)}\n\n`;
+
+  for (const client of [...eventStreamClients]) {
+    try {
+      client.res.write(chunk);
+    } catch (err) {
+      console.warn("[SSE] Broadcast an Client fehlgeschlagen:", err.message);
+      removeEventStreamClient(client);
+    }
+  }
+}
+
 function broadcastEventToStream(event) {
   if (!event || eventStreamClients.size === 0) {
     return;
@@ -1184,6 +1247,7 @@ async function applyPlaceUpdateToEvents(originalPlace, updatedPlace) {
 
   if (changed) {
     await persistEvents();
+    broadcast({ scope: "events", action: "update-places" });
   }
 }
 
@@ -1261,6 +1325,7 @@ async function recalculateEventPlacesForAllEvents() {
 
     if (changed) {
       await persistEvents();
+      broadcast({ scope: "events", action: "recalculate-places" });
     }
 
     return changed;
@@ -1430,6 +1495,11 @@ async function initializeState() {
   await fsp.mkdir(historyLogsDir, { recursive: true });
   await initializeHistoryCache();
 
+  let shouldBroadcastEvents = false;
+  let shouldBroadcastTarget = false;
+  let shouldBroadcastLatest = false;
+  let shouldBroadcastLogs = false;
+
   try {
     const files = await fsp.readdir(logsDir);
     for (const file of files) {
@@ -1444,6 +1514,7 @@ async function initializeState() {
           .split(/\r?\n/)
           .filter(line => line.trim().length > 0);
         logCounts[hex] = lines.length;
+        shouldBroadcastLogs = true;
         if (lines.length > 0) {
           const lastLine = lines[lines.length - 1];
           try {
@@ -1455,6 +1526,7 @@ async function initializeState() {
       } catch (err) {
         console.error("⚠️ Log-Datei konnte nicht gelesen werden:", file, err.message);
         logCounts[hex] = logCounts[hex] || 0;
+        shouldBroadcastLogs = true;
       }
     }
   } catch (err) {
@@ -1498,12 +1570,14 @@ async function initializeState() {
       }
 
       events = sanitized;
+      shouldBroadcastEvents = true;
 
       if (requiresPersist) {
         await persistEvents();
       }
     } else {
       events = [];
+      shouldBroadcastEvents = true;
       lastEventId = 0;
     }
   } catch (err) {
@@ -1511,6 +1585,7 @@ async function initializeState() {
       console.error("⚠️ events.json konnte nicht geladen werden:", err.message);
     }
     events = [];
+    shouldBroadcastEvents = true;
     lastEventId = 0;
   }
 
@@ -1519,6 +1594,7 @@ async function initializeState() {
     const parsed = JSON.parse(savedTarget);
     if (parsed.hex) {
       targetHex = String(parsed.hex).toLowerCase();
+      shouldBroadcastTarget = true;
     }
   } catch (err) {
     if (err.code !== "ENOENT") {
@@ -1534,11 +1610,26 @@ async function initializeState() {
     } else {
       latestData = {};
     }
+    shouldBroadcastLatest = true;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error("⚠️ latest.json konnte nicht geladen werden:", err.message);
     }
     latestData = {};
+    shouldBroadcastLatest = true;
+  }
+
+  if (shouldBroadcastLogs) {
+    broadcast({ scope: "logs", action: "load" });
+  }
+  if (shouldBroadcastEvents) {
+    broadcast({ scope: "events", action: "load" });
+  }
+  if (shouldBroadcastTarget) {
+    broadcast({ scope: "target", action: "load", hex: targetHex || null });
+  }
+  if (shouldBroadcastLatest) {
+    broadcast({ scope: "latest", action: "load" });
   }
 
   await loadPlacesFromDisk().catch(err => {
@@ -2405,6 +2496,7 @@ async function registerEvent(type, record, options = {}) {
   }
   events.push(event);
   await persistEvents();
+  broadcast({ scope: "events", action: "add", eventId: event.id, type });
   broadcastEventToStream(event);
   console.log("✈️ Event erkannt:", type, record.callsign || record.hex, "LastSeen:", record.lastSeen);
 }
@@ -2820,6 +2912,7 @@ async function scrapeOnce() {
   } catch (err) {
     console.error("⚠️ latest.json konnte nicht gespeichert werden:", err.message);
   }
+  broadcast({ scope: "latest", hex: record.hex });
 
   const status = await detectEventByLastSeen(record);
 
@@ -2929,6 +3022,8 @@ async function appendLogRecord(record) {
       console.error("⚠️ Kürzen der Log-Datei fehlgeschlagen für", hex, err.message);
     }
   }
+
+  broadcast({ scope: "logs", hex });
 }
 
 function parsePositiveInt(value, fallback) {
@@ -3760,6 +3855,7 @@ async function handleSetRequest(req, res, hexParam) {
   const aircraftName = aircraftEntry && aircraftEntry.name ? aircraftEntry.name : null;
 
   await persistLastTargetHex(targetHex);
+  broadcast({ scope: "target", action: "set", hex: targetHex });
 
   if (!page) {
     console.log("🎯 Neues Ziel gespeichert, Browser noch nicht bereit:", targetHex);
@@ -3988,6 +4084,7 @@ async function handleRequest(req, res) {
         }
 
         await persistEvents();
+        broadcast({ scope: "events", action: "delete", eventId });
         sendJSON(res, 200, { success: true });
         return;
       }
